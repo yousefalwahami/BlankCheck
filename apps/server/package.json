@@ -17,6 +17,7 @@
     "@thru/programs": "0.3.16",
     "@thru/sdk": "0.3.16",
     "@typesafe-ai/sdk": "^0.6.0",
+    "ai": "^7.0.107",
     "socket.io": "^4.8.3",
     "tsx": "^4.23.13",
     "zod": "^4.6.5"

@@ -129,37 +129,31 @@ function wav(samples) {
   return buf;
 }
 
-function clack(atFreq = 2200) {
-  const n = alloc(0.12);
-  mix(n, applyEnv(highpass(noise(0.08), 1800), 0.001, 0.07), 0, 0.9);
-  mix(n, applyEnv(osc(0.07, atFreq, "square", atFreq * 0.55), 0.001, 0.06), 0, 0.28);
-  mix(n, applyEnv(osc(0.05, 180, "sine", 90), 0.001, 0.05), 0, 0.35);
-  return n;
-}
-
 const sounds = {
   rack() {
-    const n = alloc(0.42);
-    mix(n, clack(2600), 0, 1);
-    mix(n, clack(1900), 0.15, 1.15);
-    mix(n, applyEnv(lowpass(noise(0.18), 900), 0.01, 0.16), 0.14, 0.25);
+    // Twist the popper wrapper: dry paper rustle, no metal clack.
+    const n = alloc(0.32);
+    mix(n, applyEnv(highpass(noise(0.22), 1600), 0.02, 0.2), 0, 0.7);
+    mix(n, applyEnv(osc(0.18, 420, "tri", 180), 0.01, 0.16), 0.04, 0.18);
+    mix(n, applyEnv(highpass(noise(0.08), 3200), 0.001, 0.07), 0.16, 0.45);
     return n;
   },
   bang() {
-    const n = alloc(1.35);
-    mix(n, applyEnv(noise(0.12), 0.001, 0.1), 0, 1);
-    mix(n, applyEnv(lowpass(noise(0.55), 700), 0.002, 0.5), 0, 0.85);
-    mix(n, applyEnv(osc(0.55, 110, "sine", 32), 0.002, 0.5), 0, 1);
-    mix(n, applyEnv(osc(0.18, 420, "tri", 90), 0.001, 0.16), 0, 0.35);
-    mix(n, applyEnv(lowpass(noise(0.9), 220), 0.05, 0.85), 0.04, 0.4);
+    // Live charge: party-popper crack, no boom.
+    const n = alloc(0.55);
+    mix(n, applyEnv(highpass(noise(0.08), 900), 0.0006, 0.06), 0, 1);
+    mix(n, applyEnv(osc(0.16, 980, "sine", 280), 0.001, 0.14), 0, 0.45);
+    mix(n, applyEnv(osc(0.1, 2400, "tri", 900), 0.001, 0.09), 0, 0.28);
+    mix(n, applyEnv(highpass(noise(0.28), 1800), 0.004, 0.24), 0.02, 0.35);
+    mix(n, applyEnv(osc(0.22, 520, "sine", 180), 0.004, 0.2), 0.01, 0.22);
     return n;
   },
   blank() {
-    const n = alloc(0.38);
-    mix(n, applyEnv(highpass(noise(0.04), 2500), 0.0008, 0.03), 0, 0.85);
-    mix(n, applyEnv(osc(0.06, 1400, "square", 400), 0.001, 0.05), 0, 0.22);
-    mix(n, applyEnv(osc(0.22, 78, "sine", 42), 0.004, 0.2), 0.02, 0.85);
-    mix(n, applyEnv(lowpass(noise(0.2), 400), 0.01, 0.18), 0.02, 0.35);
+    // Dud: a little air and a paper puff.
+    const n = alloc(0.28);
+    mix(n, applyEnv(highpass(noise(0.05), 2800), 0.0008, 0.04), 0, 0.7);
+    mix(n, applyEnv(osc(0.08, 620, "tri", 220), 0.002, 0.07), 0, 0.22);
+    mix(n, applyEnv(lowpass(noise(0.16), 700), 0.008, 0.14), 0.02, 0.28);
     return n;
   },
   heartbeat() {

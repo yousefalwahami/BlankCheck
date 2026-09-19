@@ -1,16 +1,11 @@
-# BLANK CHECK
+# GAMBIT RODEO
 
 > **Everyone cheats. The chain remembers.**
 
-A Jackbox-style party game inspired by Buckshot Roulette. The laptop plays on the TV, every phone is a
-controller, and **Face ID pulls the trigger** — and pays the buy-in. You buy in for $12, get 3 poker chips,
-and every live shell that hits you knocks a chip into the pot. Each round everyone gets a secret cheat card.
-Cheating is allowed; getting caught hands your whole stack to whoever called it. A **referee program written
-in C on Thru** keeps sealed evidence of every cheat and settles every chip, and at the end **Review the Tape**
-replays the game and exposes everything nobody caught.
-
-The money is play money: a **BCUSD token on Thru** (or an in-memory bank offline). A chip is $4, a buy-in is
-$12, and after the last round everyone cashes out — biggest profit wins.
+A Jackbox-style party game. The laptop plays on the TV, every phone is a
+controller, and **Face ID pops the confetti**. Each round everyone gets a secret cheat card. Cheating is
+allowed; getting caught costs you. A **referee program written in C on Thru** keeps sealed evidence of
+every cheat, and at the end **Review the Tape** replays the game and exposes everything nobody caught.
 
 Full design: [docs/BLANK_CHECK_SPEC.md](docs/BLANK_CHECK_SPEC.md).
 
@@ -27,7 +22,7 @@ Full design: [docs/BLANK_CHECK_SPEC.md](docs/BLANK_CHECK_SPEC.md).
 | `apps/web` | Next.js → Vercel | TV screen, join flow, phone controller. No secrets. |
 | `apps/server` | Node + Socket.IO → laptop / Railway / Render | Rules engine, rooms, shell orders, cheat cards, salts, bots, chain client |
 | `packages/shared` | both | Types, zod schemas, commit-reveal hashing, tape verification, Table layout |
-| `programs/referee` | Thru VM | The C referee: commitments, sealed envelopes, accusations, verdicts, chips and pots |
+| `programs/referee` | Thru VM | The C referee: commitments, sealed envelopes, accusations, verdicts, hearts |
 
 The engine is a pure reducer (`step(state, action) → { state, effects }`). Effects are chain calls,
 timers, animations and private messages. The **referee is behind an interface**:
@@ -46,17 +41,13 @@ pnpm dev            # game server on :4000, web on :3000
 Open `http://localhost:3000/host` on the laptop (that's the TV), then open `/join` in other browser
 profiles or incognito windows (each tab is its own player). Add bots to fill seats and press **START**.
 
-Everyone buys in before START (bots do it themselves; phones tap **BUY IN · $12**). Offline, the bank is in
-memory and tops every wallet up to $60, so nobody can be stuck outside a game.
-
-Tips: `?rounds=3` (or `?demo`) on `/host` starts a short game; `?rounds=N` sets any length up to 12.
-`DEMO_SEED=anything` on the server deals Uncle Gary a HOT LOAD in round 1. In Chrome DevTools → More tools →
-WebAuthn → "Enable virtual authenticator" fakes Face ID on a desktop.
+Tips: `?hearts=2` on `/host` starts in demo mode. `DEMO_SEED=anything` on the server deals Uncle Gary a HOT LOAD
+in round 1. In Chrome DevTools → More tools → WebAuthn → "Enable virtual authenticator" fakes Face ID on a desktop.
 
 ## Tests
 
 ```bash
-pnpm test              # shared + server: 60 tests (engine rules, money, referee mirror, full games over sockets)
+pnpm test              # shared + server: 53 tests (engine rules, referee mirror, full games over sockets)
 pnpm test:referee      # the C program (Linux/macOS, or WSL on Windows): needs gcc + curl
 pnpm typecheck
 ```
@@ -64,17 +55,16 @@ pnpm typecheck
 What the tests prove:
 
 - **Rules:** turn order (a blank on yourself means you go again), every cheat card, count mismatches, RIGGED!
-  (guilty takes the stack, innocent pays 1, busted, one per round, during Last Call), buy-ins and buy-backs,
-  pot payouts, and the view boundary: public state and the Pit Boss never contain secrets.
-- **Chain rules:** 10 random full games (2–6 seats, with rebuys) run through the referee mirror. Every
-  transaction is accepted, the chain's chips, buy-in counts and winner match the engine, chips never appear
-  out of nowhere (chips + pot = buy-ins × 3), and every revealed envelope re-hashes to the stored value.
+  (guilty, innocent, busted, one per round, during Last Call), eliminations, and the view boundary: public
+  state and the Pit Boss never contain secrets.
+- **Chain rules:** 10 random full games (2–6 seats) run through the referee mirror. Every transaction is
+  accepted, the chain's hearts and winner match the engine, and every revealed envelope re-hashes to the
+  stored value.
 - **C = TypeScript, byte for byte:** `programs/referee/test` compiles `blank_check.c` with gcc against the
   real Thru SDK headers and SHA-256 source (pinned commit). It checks the hash vectors (generated with
-  `node:crypto`), then replays 212 recorded instructions: 3 full games plus deliberate refusals (wrong
-  turn, forged reveal, missing Face ID, not the host, buying in with chips already on the table…). Results,
-  revert codes, emitted events and the final Table account bytes must all match. Regenerate the recording
-  with `pnpm trace`.
+  `node:crypto`), then replays 156 recorded instructions: 3 full games plus deliberate refusals (wrong
+  turn, forged reveal, missing Face ID, not the host…). Results, revert codes, emitted events and the final
+  Table account bytes must all match. Regenerate the recording with `pnpm trace`.
 - **End to end:** a TV, a phone and three bots play whole games over real sockets to Review the Tape, and a
   player who drops out doesn't freeze the table.
 
@@ -97,7 +87,7 @@ Thru VM, proven equal to the TypeScript mirror, and the whole game runs on your 
 ```bash
 pnpm install
 pnpm typecheck
-pnpm test                                   # 60 tests
+pnpm test                                   # 53 tests
 pnpm --filter @blankcheck/web build         # the exact build Vercel will run
 ```
 
@@ -216,14 +206,8 @@ THRU_HOST_SECRET=<from thru keys get host>
 REFEREE_PROGRAM_ADDRESS=<from deploy.sh>
 ```
 
-Run `pnpm dev:server`. The boot log should say `thru: house key ta… (balance …)`, `referee: thru` and
-`bank: thru (BCUSD)`. If it says it's falling back to MockReferee or MockBank, it also prints why.
-
-**The money needs no deploy.** On first boot the server creates the BCUSD mint and the cashier account
-through Thru's bootstrap Token Program, derived from the house key, and prints the mint address. Set
-`BANK_MODE=mock` to keep the game on-chain but the money in memory, or pin an existing mint with
-`BANK_MINT_ADDRESS`. Each guest gets a token account owned by the house; a Face ID player gets one owned by
-their passkey wallet, so their $12 buy-in is a transfer only their face can sign.
+Run `pnpm dev:server`. The boot log should say `thru: house key ta… (balance …)` and `referee: thru`. If
+it says it's falling back to MockReferee, it also prints why.
 
 ### 2.5 Smoke test on-chain
 
@@ -233,9 +217,8 @@ pnpm --filter @blankcheck/server chain:smoke
 
 This plays a short all-bot game against the deployed program and prints every transaction with its
 **measured latency** and explorer link. It then reads the Table account back from the RPC node and checks
-chips, buy-in counts, the pot, the winner, every sealed envelope and every shell commitment. **Write down the
-latency numbers** (spec §11 Phase 0(d)); they go in the pitch. `SMOKE_SEATS` and `SMOKE_ROUNDS` make the game
-longer.
+hearts, winner, every sealed envelope and every shell commitment. **Write down the latency numbers**
+(spec §11 Phase 0(d)); they go in the pitch. `SMOKE_SEATS` and `SMOKE_HEARTS` make the game longer.
 
 If `CREATE_TABLE` is rejected for resources (it allocates ~75 KB), raise `THRU_STATE_UNITS` /
 `THRU_MEMORY_UNITS` in `.env` and rerun.
@@ -290,7 +273,7 @@ on trigger** in the lobby. Seats are then house-signed and everything else stays
 
 ### 2.10 Demo-day checklist
 
-- The server is awake (`/health`), `DEMO_SEED` is set, and the TV is open at `/host?demo` (3 rounds).
+- The server is awake (`/health`), `DEMO_SEED` is set, and the TV is open at `/host?hearts=2`.
 - The explorer is open on the table account (the TV's final card has a QR code for it).
 - A backup video of a full on-chain game is recorded.
 - Have one sentence on the trust model ready (below). Venue Wi-Fi blocking WebSockets? Use a phone hotspot.
@@ -330,9 +313,9 @@ announced. The stretch goal in spec §6.8 (phones seal their own envelopes with 
 | Phase | State |
 |---|---|
 | 0. De-risk | Alphanet RPC reachable (chain id 161 ms, height 84 ms, creating proof 84 ms). Tx latency: run `chain:smoke` (Phase 2.5) |
-| 1. Offline game | ✅ Full rules, rooms, QR join, TV, phone controller, cheats, RIGGED!, Last Call, chips, buy-ins, cash-out |
+| 1. Offline game | ✅ Full rules, rooms, QR join, TV, phone controller, cheats, RIGGED!, Last Call, elimination, win |
 | 2. Referee on-chain | ✅ C program + byte-for-byte host test; `ThruReferee` + tx queue + ticker. Compile + deploy: Phases 1.4 and 2.3 |
-| 3. Face ID on-chain | ✅ Built on `@thru/passkey` (wallet creation, challenges prefetched on aim, validate→CPI), and the same face signs the $12 buy-in. Device test: Phase 2.9 |
+| 3. Face ID on-chain | ✅ Built on `@thru/passkey` (wallet creation, challenges prefetched on aim, validate→CPI). Device test: Phase 2.9 |
 | 4. Jev | ✅ Four personalities, typed taunts, Pit Boss meters; heuristic fallback |
 | 5. Review the Tape | ✅ VHS replay, browser re-hash, direct chain read, CAUGHT / GOT AWAY stamps, awards |
 | 6. Polish | ✅ Synthesized sound, CRT/VHS look, demo seed. Pitch rehearsal is yours |
@@ -342,17 +325,11 @@ announced. The stretch goal in spec §6.8 (phones seal their own envelopes with 
 - **C entrypoint:** `start(void const *instr, ulong sz)`. The VM passes instruction bytes in `a0/a1` both
   at the top level and under CPI, which is how passkey-manager `validate` calls us. The program stack is
   4 KiB, so there are no large locals.
-- **Table layout** (74,850 bytes, magic `BCK2`) is defined once in `packages/shared/src/table.ts`,
-  static-asserted in `blank_check.h`, and parsed by the browser for the tape. It adds `window_count[round]`
-  so tape reveals of past rounds can require every window. Changing it means
-  `programs/referee/deploy.sh upgrade`: an older deployed program will reject `CREATE_TABLE`.
-- **Every seal window seals every seat.** Broke seats get decoys too, which keeps `env[round][window][seat]` dense.
-- **Round cap:** `COMMIT_ROUND` with 0 shells ends the game on profit, which is also how a table with
-  fewer than two funded players cashes out early.
-- **The chain settles the money.** `RESOLVE_SHOT` moves the chip to the pot, `REVEAL` hands a cheater's
-  stack to their accuser, `BUY_IN` records the $12 (with the token transfer's signature as its memo) and
-  `END_ROUND` pays the pot to the chip leader. The dollars move in the Token Program; the chips move in the
-  referee; the tape shows both, linked by signature.
+- **Table layout** (74,834 bytes) is defined once in `packages/shared/src/table.ts`, static-asserted in
+  `blank_check.h`, and parsed by the browser for the tape. It adds `window_count[round]` so tape reveals of
+  past rounds can require every window.
+- **Every seal window seals every seat.** Eliminated seats get decoys too, which keeps `env[round][window][seat]` dense.
+- **Round cap:** `COMMIT_ROUND` with 0 shells ends the game by hearts, for the unlikely 25th round.
 - **SDK SHA-256** uses RISC-V Zknh instructions. The host test swaps only those four macros for C.
 - **House transactions** share `@thru/passkey`'s global fee-payer queue, and cache chain id, slot and nonce,
   so a shot costs one round trip.

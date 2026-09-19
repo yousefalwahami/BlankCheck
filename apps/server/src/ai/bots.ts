@@ -32,7 +32,7 @@ export const PERSONALITIES: Record<BotId, Personality> = {
   },
   mercy: {
     accuseAt: () => 0.7,
-    cheatDrive: (v) => (v.me.chips <= 1 ? 0.5 : 0),
+    cheatDrive: (v) => (v.me.hearts <= 1 ? 0.5 : 0),
     aim: "saint",
   },
   intern: {
@@ -58,13 +58,13 @@ function believedPLive(v: BotView): number {
 }
 
 function leader(v: BotView, rng: Rng): number {
-  const max = Math.max(...v.others.map((o) => o.chips));
-  return rng.pick(v.others.filter((o) => o.chips === max)).seat;
+  const max = Math.max(...v.others.map((o) => o.hearts));
+  return rng.pick(v.others.filter((o) => o.hearts === max)).seat;
 }
 
 function weakest(v: BotView, rng: Rng): number {
-  const min = Math.min(...v.others.map((o) => o.chips));
-  return rng.pick(v.others.filter((o) => o.chips === min)).seat;
+  const min = Math.min(...v.others.map((o) => o.hearts));
+  return rng.pick(v.others.filter((o) => o.hearts === min)).seat;
 }
 
 /** Code-only aim. Hard rule (spec §8.3): if the shell can't be live, shoot yourself. */
@@ -89,8 +89,8 @@ export async function think(id: BotId, v: BotView, rng: Rng, opts: { wantAim: bo
   const pLive = believedPLive(v);
   const heur = heuristicSuspicion({ countIsOff: v.odds.countIsOff, seats: v.others });
   const aimOptions: Record<string, string> = {
-    self: `Shoot myself. If it's a blank I keep my turn. (P(live) = ${pLive.toFixed(2)})`,
-    ...Object.fromEntries(v.others.map((o) => [`seat_${o.seat}`, `Shoot ${o.name} (${o.chips} chips)`])),
+    self: `Pop myself. If it's a blank I keep my turn. (P(live) = ${pLive.toFixed(2)})`,
+    ...Object.fromEntries(v.others.map((o) => [`seat_${o.seat}`, `Pop ${o.name} (${o.hearts} hearts left)`])),
   };
   const state = {
     you: v.me,
@@ -104,7 +104,7 @@ export async function think(id: BotId, v: BotView, rng: Rng, opts: { wantAim: bo
   const answers =
     v.others.length > 0
       ? await askJev(state, {
-          ...(opts.wantAim ? { aim: choice("Who should I shoot with the chambered shell? Think in odds.", aimOptions) } : {}),
+          ...(opts.wantAim ? { aim: choice("Who should I pop with the chambered charge? Think in odds.", aimOptions) } : {}),
           cheatNow: noul("Playing my cheat card right now would help me without getting caught"),
           ...Object.fromEntries(v.others.map((o) => [`sus_${o.seat}`, noul(`${o.name} played a cheat card this round`)])),
           ...(opts.wantTaunt ? { taunt: choice("Which line fits this moment best?", TAUNT_CHOICES) } : {}),
@@ -140,16 +140,13 @@ export async function think(id: BotId, v: BotView, rng: Rng, opts: { wantAim: bo
 export function pickAccusation(id: BotId, v: BotView, suspicion: Record<number, number>, rng: Rng): number | null {
   if (v.me.usedRiggedThisRound) return null;
   const threshold = PERSONALITIES[id].accuseAt(rng);
-  const candidates = v.others.filter((o) => !o.busted && o.chips > 0);
+  const candidates = v.others.filter((o) => !o.busted);
   if (!candidates.length) return null;
-  // Guilty hands over EVERY chip; a wrong call costs one. Go after the biggest expected payout.
-  const ev = (o: (typeof candidates)[number]) => (suspicion[o.seat] ?? 0) * o.chips - (1 - (suspicion[o.seat] ?? 0));
-  const best = candidates.reduce((a, b) => (ev(b) > ev(a) ? b : a));
+  const best = candidates.reduce((a, b) => ((suspicion[b.seat] ?? 0) > (suspicion[a.seat] ?? 0) ? b : a));
   const p = suspicion[best.seat] ?? 0;
-  // A wrong call on your last chip leaves you broke; only Gary gambles like that.
-  if (v.me.chips <= 1 && id !== "gary" && p < 0.95) return null;
-  const juicy = id !== "accountant" && p >= 0.3 && ev(best) >= 2;
-  return p >= threshold || juicy ? best.seat : null;
+  // A wrong call costs a heart; nobody on their last heart gambles unless they're Gary.
+  if (v.me.hearts <= 1 && id !== "gary" && p < 0.95) return null;
+  return p >= threshold ? best.seat : null;
 }
 
 /** Card timing: HOT LOAD hurts someone else's self-shot, DUD saves you, PEEK/SWAP on your own turn. */

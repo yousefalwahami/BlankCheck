@@ -1,60 +1,74 @@
 "use client";
 
-import { BOTS, SEAT_COLORS, dollars, type Seat } from "@blankcheck/shared";
-import { AnimatePresence, motion } from "motion/react";
+import { BOTS, SEAT_COLORS, type Seat } from "@blankcheck/shared";
+import { motion } from "motion/react";
 
-/** One poker chip, seen from above: a coloured disc with an edge-spot ring. */
-export function ChipIcon({ size = 24, color = "#e0312b", className = "" }: { size?: number; color?: string; className?: string }) {
+export function GameTitle({ className = "" }: { className?: string }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 40 40" className={className} aria-hidden>
-      <circle cx="20" cy="20" r="19" fill={color} stroke="#000" strokeWidth="1.5" />
-      <circle cx="20" cy="20" r="15.5" fill="none" stroke="#efe6d2" strokeWidth="5" strokeDasharray="6.1 6.1" />
-      <circle cx="20" cy="20" r="11" fill={color} stroke="#000" strokeOpacity="0.35" strokeWidth="1" />
-      <circle cx="20" cy="20" r="8" fill="none" stroke="#efe6d2" strokeOpacity="0.55" strokeWidth="1" strokeDasharray="2 2" />
-    </svg>
-  );
-}
-
-/** A small overlapping stack of chips with the count beside it. */
-export function Chips({ n, size = 22, max = 8, color, className = "" }: { n: number; size?: number; max?: number; color?: string; className?: string }) {
-  const shown = Math.min(n, max);
-  return (
-    <span className={`inline-flex items-center gap-1.5 ${className}`} aria-label={`${n} chip${n === 1 ? "" : "s"}`}>
-      <span className="inline-flex items-center" style={{ minWidth: size }}>
-        <AnimatePresence initial={false}>
-          {Array.from({ length: shown }, (_, i) => (
-            <motion.span
-              key={i}
-              initial={{ y: -size, opacity: 0, scale: 1.3 }}
-              animate={{ y: 0, opacity: 1, scale: 1 }}
-              exit={{ y: -size * 0.8, opacity: 0, scale: 0.7 }}
-              transition={{ type: "spring", stiffness: 420, damping: 22 }}
-              style={{ marginLeft: i === 0 ? 0 : -size * 0.62 }}
-            >
-              <ChipIcon size={size} color={color} />
-            </motion.span>
-          ))}
-        </AnimatePresence>
-        {n === 0 && <ChipIcon size={size} color="#3a3531" className="opacity-40" />}
-      </span>
-      <motion.span key={n} initial={{ scale: 1.5 }} animate={{ scale: 1 }} className="font-display tabular-nums leading-none" style={{ fontSize: size * 0.95 }}>
-        {n}
-      </motion.span>
+    <span className={`vhs-title ${className}`}>
+      GAMBIT <span className="text-blood">RODEO</span>
     </span>
   );
 }
 
-/** Profit in dollars: green up, red down. */
-export function Profit({ cents, className = "" }: { cents: number; className?: string }) {
+const CONFETTI_COLORS = ["#e0312b", "#e8b13a", "#7dffa8", "#4ea8de", "#9b5de5", "#efe6d2", "#e4572e"];
+
+function bits(seed: number, n: number, spread: number) {
+  const out: { color: string; w: number; h: number; dx: number; dy: number; rot: number; delay: number }[] = [];
+  let s = Math.abs(seed % 2147483646) + 1;
+  for (let i = 0; i < n; i++) {
+    s = (s * 16807 + i * 97) % 2147483647;
+    const u = s / 2147483647;
+    s = (s * 48271) % 2147483647;
+    const v = s / 2147483647;
+    out.push({
+      color: CONFETTI_COLORS[i % CONFETTI_COLORS.length],
+      w: 5 + (i % 5) * 2,
+      h: 9 + (i % 4) * 3,
+      dx: (u - 0.5) * spread,
+      dy: -20 - v * spread * 0.65,
+      rot: (u - 0.5) * 540,
+      delay: (i % 7) * 0.03,
+    });
+  }
+  return out;
+}
+
+export function ConfettiBurst({ n = 18, seed = 1, spread = 220, className = "" }: { n?: number; seed?: number; spread?: number; className?: string }) {
   return (
-    <span className={`tabular-nums ${cents > 0 ? "text-crt" : cents < 0 ? "text-blood" : "text-ash"} ${className}`}>
-      {cents > 0 ? "+" : ""}
-      {dollars(cents)}
+    <div className={`pointer-events-none absolute inset-0 overflow-visible ${className}`} aria-hidden>
+      {bits(seed, n, spread).map((b, i) => (
+        <motion.span
+          key={i}
+          className="absolute left-1/2 top-1/2 rounded-[1px]"
+          style={{ width: b.w, height: b.h, background: b.color, marginLeft: -b.w / 2, marginTop: -b.h / 2 }}
+          initial={{ x: 0, y: 0, opacity: 1, rotate: 0, scale: 1 }}
+          animate={{ x: b.dx, y: b.dy, opacity: 0, rotate: b.rot, scale: 0.35 }}
+          transition={{ duration: 0.85, delay: b.delay, ease: "easeOut" }}
+        />
+      ))}
+    </div>
+  );
+}
+
+export function Hearts({ n, max, size = "text-2xl" }: { n: number; max: number; size?: string }) {
+  return (
+    <span className={`inline-flex gap-0.5 ${size}`} aria-label={`${n} of ${max} hearts`}>
+      {Array.from({ length: max }, (_, i) => (
+        <motion.span
+          key={i}
+          initial={false}
+          animate={i < n ? { scale: 1, opacity: 1, filter: "grayscale(0)" } : { scale: 0.8, opacity: 0.25, filter: "grayscale(1)" }}
+          transition={{ type: "spring", stiffness: 400, damping: 18 }}
+        >
+          ❤️
+        </motion.span>
+      ))}
     </span>
   );
 }
 
-/** A shotgun shell. `live` red, blank steel-blue, `spent` dim. */
+/** A live (red) or blank (steel-blue) charge. `spent` dims it. */
 export function Shell({ live, spent = false, size = 26, highlight = false }: { live: boolean; spent?: boolean; size?: number; highlight?: boolean }) {
   const body = live ? "#c42a24" : "#5d7488";
   return (
@@ -67,34 +81,23 @@ export function Shell({ live, spent = false, size = 26, highlight = false }: { l
   );
 }
 
-/** `broke`: out of chips (greyed). `ghost`: cleaned out for good. */
-export function Avatar({
-  seat,
-  size = 64,
-  broke = false,
-  ghost = false,
-}: {
-  seat: Pick<Seat, "seat" | "name" | "kind" | "personality">;
-  size?: number;
-  broke?: boolean;
-  ghost?: boolean;
-}) {
+export function Avatar({ seat, size = 64 }: { seat: Pick<Seat, "seat" | "name" | "kind" | "personality" | "hearts">; size?: number }) {
   const color = SEAT_COLORS[seat.seat % SEAT_COLORS.length];
-  const dim = broke || ghost;
+  const dead = seat.hearts <= 0;
   const label = seat.kind === "bot" && seat.personality ? BOTS[seat.personality].emoji : seat.name.slice(0, 1).toUpperCase();
   return (
     <div
-      className={`flex shrink-0 items-center justify-center rounded-full font-display ${dim ? "grayscale" : ""} ${broke && !ghost ? "opacity-60" : ""}`}
+      className={`flex shrink-0 items-center justify-center rounded-full font-display ${dead ? "grayscale" : ""}`}
       style={{
         width: size,
         height: size,
         fontSize: size * 0.48,
         background: `radial-gradient(circle at 35% 30%, ${color}, ${color}55 70%)`,
         border: `3px solid ${color}`,
-        boxShadow: dim ? "none" : `0 0 ${size / 3}px ${color}55`,
+        boxShadow: dead ? "none" : `0 0 ${size / 3}px ${color}55`,
       }}
     >
-      {ghost ? "👻" : label}
+      {dead ? "👻" : label}
     </div>
   );
 }

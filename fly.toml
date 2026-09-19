@@ -1,0 +1,42 @@
+# Game server. One always-on Machine: rooms live in memory, so a second replica
+# would split the table. auto_stop is off so a demo cannot sleep mid-round.
+app = "blank-check"
+primary_region = "iad"
+
+[build]
+  dockerfile = "apps/server/Dockerfile"
+
+[env]
+  PORT = "4000"
+  NODE_ENV = "production"
+  CORS_ORIGINS = "*"
+  REFEREE_MODE = "thru"
+  WAIT_FOR_CHAIN = "true"
+  CHAIN_WAIT_CAP_MS = "4000"
+  THRU_RPC_URL = "https://rpc.alphanet.thru.org"
+  EXPLORER_URL = "https://scan.thru.org"
+  JEV_MODEL = "typesafe-ai/jev"
+  REFEREE_PROGRAM_ADDRESS = "tahUwXUa30e1Y94-aESzhMBiMA2LfkaYOYHG6xdiTM7nMm"
+
+[http_service]
+  internal_port = 4000
+  force_https = true
+  auto_stop_machines = "off"
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [http_service.concurrency]
+    type = "connections"
+    hard_limit = 250
+    soft_limit = 200
+
+  [[http_service.checks]]
+    interval = "15s"
+    timeout = "2s"
+    grace_period = "25s"
+    method = "GET"
+    path = "/health"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
