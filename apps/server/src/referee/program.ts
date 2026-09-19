@@ -41,7 +41,10 @@ export const ERR = {
   ACCUSE: 0x200c,
   HASH: 0x200d,
   CREATE: 0x200e,
+  WRITABLE: 0x200f,
+  RESIZE: 0x2010,
   SHOT: 0x2011,
+  EVENT: 0x2012,
 } as const;
 
 export const ERR_NAMES: Record<number, string> = Object.fromEntries(Object.entries(ERR).map(([k, v]) => [v, k]));
