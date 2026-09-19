@@ -144,9 +144,6 @@ export function HostScreen() {
         case "buyInWindow":
           sfx.tick();
           break;
-        case "lastCall":
-          sfx.tick();
-          break;
         case "taunt":
           setTaunts((x) => ({ ...x, [f.seat]: { text: f.text, at } }));
           break;
@@ -164,6 +161,22 @@ export function HostScreen() {
       }
     }, [fly]),
   );
+
+  const currentChips = state?.seats[state.currentSeat]?.chips ?? 0;
+  useEffect(() => {
+    if (state?.phase !== "LAST_CALL") return;
+    sfx.tick();
+    const t = setInterval(() => sfx.tick(), 850);
+    return () => clearInterval(t);
+  }, [state?.phase]);
+
+  useEffect(() => {
+    const holding = state?.phase === "AWAIT_AIM" || state?.phase === "AWAIT_TRIGGER";
+    if (!holding || currentChips !== 1) return;
+    sfx.heartbeat();
+    const t = setInterval(() => sfx.heartbeat(), 1100);
+    return () => clearInterval(t);
+  }, [state?.phase, state?.currentSeat, currentChips]);
 
   const serverUrl = useMemo(() => (origin ? resolveServerUrl() : ""), [origin]);
   const joinUrl = state && origin ? `${origin}/join?room=${state.room}&server=${encodeURIComponent(serverUrl)}` : "";
@@ -301,7 +314,10 @@ export function HostScreen() {
           const next = !sound;
           setSound(next);
           setMuted(!next);
-          if (next) unlockAudio();
+          if (next) {
+            unlockAudio();
+            sfx.tick();
+          }
         }}
         className="fixed bottom-[8vh] right-3 z-50 font-crt text-[2.4vh] text-ash hover:text-bone"
         aria-label={sound ? "Mute" : "Unmute"}
