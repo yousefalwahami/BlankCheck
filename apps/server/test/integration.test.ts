@@ -106,6 +106,22 @@ describe("a full game over sockets", () => {
     phone.close();
   }, 60_000);
 
+  it("a player who drops out doesn't freeze the table", async () => {
+    const tv = connect(url, { transports: ["websocket"] });
+    const phone = connect(url, { transports: ["websocket"] });
+    const { room } = await ask(tv, "room:create", { hearts: 1 });
+    expect((await ask(phone, "room:join", { room, name: "Ghost", playerId: "player-ghost-1" })).ok).toBe(true);
+    await ask(tv, "bot:add", { personality: "accountant" });
+    await ask(tv, "bot:add", { personality: "intern" });
+    phone.close(); // gone before the game even starts
+    const tape = await new Promise<TapeData>((resolve) => {
+      tv.on("fx", (fx: Fx) => fx.type === "tape" && resolve(fx.tape));
+      void ask(tv, "game:start");
+    });
+    expect(tape.rounds.length).toBeGreaterThan(0);
+    tv.close();
+  }, 60_000);
+
   it("rejects bad payloads and outsiders", async () => {
     const tv = connect(url, { transports: ["websocket"] });
     const stranger = connect(url, { transports: ["websocket"] });

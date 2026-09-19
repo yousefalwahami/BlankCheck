@@ -158,6 +158,7 @@ export class Room {
     if (s) {
       s.connected = connected;
       this.touch();
+      this.scheduleAfk();
     }
   }
 
@@ -521,6 +522,32 @@ export class Room {
     if (s.publicShots.length > prev.publicShots.length) void this.runPitBoss();
     this.scheduleBotTurn();
     this.scheduleBotSideMoves();
+    this.scheduleAfk();
+  }
+
+  private afkKey = "";
+  /**
+   * A disconnected player shouldn't freeze the table. If they're up for 20 s while offline and their
+   * seat is house-signed, the dealer shoots them (at themselves: house rules). Face ID seats wait,
+   * because only their phone can sign their trigger pull.
+   */
+  private scheduleAfk() {
+    const s = this.state;
+    const cur = s.seats[s.currentSeat];
+    const key = `${s.round}:${s.shot}:${s.currentSeat}`;
+    if (!cur || cur.kind !== "human" || cur.connected || this.seatUsesPasskey(cur.seat)) return;
+    if (s.phase !== "AWAIT_AIM" && s.phase !== "AWAIT_TRIGGER") return;
+    if (this.afkKey === key) return;
+    this.afkKey = key;
+    const gen = this.generation;
+    setTimeout(() => {
+      const now = this.state;
+      const seat = now.seats[now.currentSeat];
+      if (gen !== this.generation || `${now.round}:${now.shot}:${now.currentSeat}` !== key || !seat || seat.connected) return;
+      this.log(`🎩 The dealer plays for ${seat.name} (disconnected)`);
+      if (now.phase === "AWAIT_AIM") this.dispatch({ type: "AIM", seat: seat.seat, target: seat.seat });
+      if (this.phase() === "AWAIT_TRIGGER") this.dispatch({ type: "PULL", seat: seat.seat, auth: { type: "host" } });
+    }, 20_000 * config.timeScale);
   }
 
   private scheduleBotTurn() {
