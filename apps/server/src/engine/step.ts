@@ -164,7 +164,7 @@ function reduce(s: GameState, a: Action, ctx: StepCtx, fx: Effect[]): void {
       rule(card !== undefined, "You have no card this round");
       rule(!s.secret.used[a.seat], "You already played your card");
       const i = s.shot;
-      rule(i < s.secret.current.length, "The gun is empty");
+      rule(i < s.secret.current.length, "The popper is empty");
       const sec = s.secret;
       let note = `${CHEAT_INFO[card].emoji} ${CHEAT_INFO[card].name} played on shell #${i + 1}.`;
       if (card === Cheat.PEEK) {
@@ -433,7 +433,7 @@ function fire(s: GameState, ctx: StepCtx, fx: Effect[]): void {
 
   const who = seatName(s, shooter);
   const whom = target === shooter ? "themselves" : seatName(s, target);
-  pushLog(s, ctx.now, "shot", live ? `💥 BANG. ${who} shot ${whom}: a chip into the pot.` : `💨 click. ${who} shot ${whom}.${again ? " Goes again." : ""}`, shooter);
+  pushLog(s, ctx.now, "shot", live ? `🎉 POP! ${who} popped ${whom}: a chip into the pot.` : `💨 pfft. ${who} popped ${whom}.${again ? " Goes again." : ""}`, shooter);
 
   const wasOff = s.countIsOff;
   const liveOver = s.fired.live > s.announced.live;

@@ -1,9 +1,9 @@
-# BLANK CHECK
+# GAMBIT RODEO
 
 > **Everyone cheats. The chain remembers.**
 
-A Jackbox-style party game inspired by Buckshot Roulette. The laptop plays on the TV, every phone is a
-controller, and **Face ID pulls the trigger** — and pays the buy-in. You buy in for $12, get 3 poker chips,
+A Jackbox-style party game. The laptop plays on the TV, every phone is a
+controller, and **Face ID pops the confetti** — and pays the buy-in. You buy in for $12, get 3 poker chips,
 and every live shell that hits you knocks a chip into the pot. Each round everyone gets a secret cheat card.
 Cheating is allowed; getting caught hands your whole stack to whoever called it. A **referee program written
 in C on Thru** keeps sealed evidence of every cheat and settles every chip, and at the end **Review the Tape**
@@ -284,7 +284,7 @@ Do this at least once on an **iPhone** and once on **Android**, against the Verc
    shows the referee's confirmation time.
 4. At the end, the tape's top-right corner should read `⛓ N/N hashes match the Table account on Thru`.
 
-The trigger is already two taps: picking a target fetches the challenge, and **PULL TRIGGER** calls WebAuthn
+The trigger is already two taps: picking a target fetches the challenge, and **POP IT** calls WebAuthn
 directly inside the tap, as iOS requires. If a venue or device still refuses the prompt, uncheck **Face ID
 on trigger** in the lobby. Seats are then house-signed and everything else stays on-chain.
 

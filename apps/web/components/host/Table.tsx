@@ -2,7 +2,7 @@
 
 import { MONEY, dollars, type PitBossReading, type PublicState } from "@blankcheck/shared";
 import { AnimatePresence, motion } from "motion/react";
-import { Avatar, ChipIcon, Chips, Shell, seatColor } from "../ui/bits";
+import { Avatar, ChipIcon, Chips, ConfettiBurst, Shell, seatColor } from "../ui/bits";
 
 export type SeatFx = { kind: "hit" | "miss" | "boo" | "buyIn"; at: number };
 
@@ -59,7 +59,7 @@ export function ShellBoard({ state }: { state: PublicState }) {
       </div>
       <div className="h-[6vh] w-px bg-bone/15" />
       <div className="text-center">
-        <p className="text-[1.8vh] tracking-[0.3em] text-ash">IN THE GUN</p>
+        <p className="text-[1.8vh] tracking-[0.3em] text-ash">IN THE TUBE</p>
         <p className="font-display text-[4vh] leading-none">{state.shellsLeft}</p>
       </div>
       <div className="h-[6vh] w-px bg-bone/15" />
@@ -82,38 +82,77 @@ export function ShellBoard({ state }: { state: PublicState }) {
   );
 }
 
-function Shotgun({ angle, raised }: { angle: number; raised: boolean }) {
+const POP_STREAM = [
+  { color: "#e0312b", y: -14, rot: 80, delay: 0 },
+  { color: "#e8b13a", y: 8, rot: -50, delay: 0.08 },
+  { color: "#7dffa8", y: -4, rot: 140, delay: 0.16 },
+  { color: "#4ea8de", y: 16, rot: -110, delay: 0.04 },
+  { color: "#9b5de5", y: -18, rot: 40, delay: 0.22 },
+  { color: "#efe6d2", y: 2, rot: -20, delay: 0.12 },
+  { color: "#e4572e", y: 12, rot: 200, delay: 0.28 },
+  { color: "#e8b13a", y: -10, rot: -160, delay: 0.18 },
+];
+
+function ConfettiPopper({ angle, raised }: { angle: number; raised: boolean }) {
   return (
     <motion.div
       className="absolute left-1/2 top-1/2 z-10"
       style={{ width: 0, height: 0 }}
-      animate={{ rotate: angle, scale: raised ? 1.08 : 1 }}
+      animate={{ rotate: angle, scale: raised ? 1.1 : 1 }}
       transition={{ type: "spring", stiffness: 70, damping: 14 }}
     >
-      <svg width="280" height="60" viewBox="0 0 280 60" style={{ transform: "translate(-110px, -30px)" }} aria-hidden>
+      <svg width="300" height="90" viewBox="0 0 300 90" style={{ transform: "translate(-92px, -45px)" }} aria-hidden>
         <defs>
-          <linearGradient id="barrel" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0" stopColor="#6d6d72" />
-            <stop offset="0.5" stopColor="#2b2b2f" />
-            <stop offset="1" stopColor="#141416" />
+          <linearGradient id="pop-wood" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stopColor="#c9843a" />
+            <stop offset="1" stopColor="#6b3a14" />
           </linearGradient>
-          <linearGradient id="stock" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0" stopColor="#7a4a26" />
-            <stop offset="1" stopColor="#3b2210" />
+          <linearGradient id="pop-body" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0" stopColor="#e8b13a" />
+            <stop offset="0.35" stopColor="#e0312b" />
+            <stop offset="0.7" stopColor="#29a19c" />
+            <stop offset="1" stopColor="#e8b13a" />
           </linearGradient>
+          <linearGradient id="pop-cone" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0" stopColor="#c42a24" />
+            <stop offset="1" stopColor="#f3a712" />
+          </linearGradient>
+          <pattern id="pop-stripes" width="18" height="18" patternUnits="userSpaceOnUse" patternTransform="rotate(28)">
+            <rect width="18" height="18" fill="#c42a24" />
+            <rect width="9" height="18" fill="#e8b13a" />
+          </pattern>
         </defs>
-        <path d="M4 22 L70 18 L96 22 L96 40 L70 44 L20 52 L4 46 Z" fill="url(#stock)" stroke="#000" strokeWidth="2" />
-        <rect x="92" y="18" width="46" height="22" rx="3" fill="#232326" stroke="#000" strokeWidth="2" />
-        <rect x="136" y="20" width="140" height="9" rx="2" fill="url(#barrel)" stroke="#000" strokeWidth="1.5" />
-        <rect x="136" y="30" width="112" height="9" rx="2" fill="url(#barrel)" stroke="#000" strokeWidth="1.5" />
-        <rect x="160" y="29" width="46" height="13" rx="3" fill="url(#stock)" stroke="#000" strokeWidth="1.5" />
-        <path d="M112 40 q6 12 16 0" fill="none" stroke="#000" strokeWidth="3" />
+        <path d="M8 38 L54 32 L70 36 L70 56 L50 62 L14 68 L8 58 Z" fill="url(#pop-wood)" stroke="#000" strokeWidth="2" />
+        <circle cx="22" cy="72" r="7" fill="none" stroke="#e8b13a" strokeWidth="3" />
+        <path d="M22 65 v-8" stroke="#e8b13a" strokeWidth="2" />
+        <rect x="66" y="30" width="78" height="32" rx="8" fill="url(#pop-stripes)" stroke="#000" strokeWidth="2" />
+        <rect x="66" y="30" width="78" height="32" rx="8" fill="url(#pop-body)" opacity="0.35" />
+        <rect x="72" y="34" width="10" height="24" rx="2" fill="#efe6d2" opacity="0.25" />
+        <path d="M142 24 L248 10 L248 82 L142 68 Z" fill="url(#pop-cone)" stroke="#000" strokeWidth="2" />
+        <path d="M142 24 L248 10 L248 82 L142 68 Z" fill="url(#pop-stripes)" opacity="0.35" />
+        <ellipse cx="248" cy="46" rx="10" ry="36" fill="#e8b13a" stroke="#000" strokeWidth="2" />
+        <ellipse cx="252" cy="46" rx="5" ry="28" fill="#1a120c" />
+        <path d="M248 14 q18 -10 28 2" fill="none" stroke="#efe6d2" strokeWidth="3" />
+        <path d="M248 78 q16 10 26 -4" fill="none" stroke="#7dffa8" strokeWidth="3" />
+        <circle cx="108" cy="46" r="7" fill="#efe6d2" stroke="#000" strokeWidth="1.5" />
+        <path d="M108 41 l1.5 3.2 3.5.3-2.7 2.3.8 3.4-3.1-1.9-3.1 1.9.8-3.4-2.7-2.3 3.5-.3 Z" fill="#e0312b" />
       </svg>
+      {raised &&
+        POP_STREAM.map((p, i) => (
+          <motion.span
+            key={i}
+            className="absolute rounded-[1px]"
+            style={{ left: 168, top: 0, width: 7 + (i % 3), height: 11 + (i % 4) * 2, background: p.color, marginTop: -6 }}
+            initial={{ x: 0, y: 0, opacity: 0, rotate: 0 }}
+            animate={{ x: [0, 70, 130], y: [0, p.y, p.y * 1.6], opacity: [0, 1, 0], rotate: [0, p.rot] }}
+            transition={{ duration: 0.55, delay: p.delay, repeat: Infinity, ease: "easeOut" }}
+          />
+        ))}
     </motion.div>
   );
 }
 
-/** The pot: a messy pile of chips in the middle of the felt, under the gun. */
+/** The pot: a messy pile of chips in the middle of the felt, under the popper. */
 function PotPile({ n }: { n: number }) {
   const pile = Array.from({ length: Math.min(n, 14) }, (_, i) => ({
     x: Math.sin(i * 2.4) * (10 + i * 3.2),
@@ -178,7 +217,7 @@ export function Table(props: {
   const target = state.aimingAt;
   const cur = state.currentSeat;
   const pointAt = target ?? cur;
-  const gunAngle = n ? (seatPos(pointAt, n).theta * 180) / Math.PI : 90;
+  const popAngle = n ? (seatPos(pointAt, n).theta * 180) / Math.PI : 90;
   const aiming = target !== null && (state.phase === "AWAIT_TRIGGER" || state.phase === "RESOLVING");
   const showPit = Object.keys(props.pit).length > 0;
   const betweenRounds = ["LAST_CALL", "ROUND_END", "BUY_INS", "OVER", "TAPE", "ROUND_START"].includes(state.phase);
@@ -187,7 +226,7 @@ export function Table(props: {
     <div className="relative h-full w-full">
       <div className="felt absolute left-[14%] right-[14%] top-[16%] bottom-[16%] rounded-[50%] border-[10px] border-[#2a1a0e]" />
       <PotPile n={state.pot} />
-      <Shotgun angle={gunAngle} raised={aiming} />
+      <ConfettiPopper angle={popAngle} raised={aiming} />
       {props.flights.map((f) => (
         <FlightView key={f.id} f={f} n={n} />
       ))}
@@ -236,9 +275,10 @@ export function Table(props: {
               <div className="relative">
                 <Avatar seat={s} size={88} broke={broke} ghost={s.cleanedOut} />
               </div>
-              {recentFx?.kind === "hit" && (
-                <motion.div initial={{ scale: 0.5, opacity: 1 }} animate={{ scale: 2.2, opacity: 0 }} transition={{ duration: 0.9 }} className="absolute inset-0 text-center text-[6vh]">
-                  💥
+              {recentFx?.kind === "hit" && <ConfettiBurst n={22} seed={s.seat + 3} />}
+              {recentFx?.kind === "miss" && (
+                <motion.div initial={{ scale: 0.7, opacity: 0.9 }} animate={{ scale: 1.4, opacity: 0 }} transition={{ duration: 0.7 }} className="absolute inset-0 text-center text-[4vh]">
+                  💨
                 </motion.div>
               )}
               {recentFx?.kind === "buyIn" && (

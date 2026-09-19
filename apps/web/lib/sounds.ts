@@ -105,10 +105,32 @@ function fallback(name: SfxName) {
   const c = ctx;
   if (!c || muted) return;
   const t = c.currentTime;
+  if (name === "bang" || name === "blank") {
+    const dur = name === "bang" ? 0.32 : 0.18;
+    const buf = c.createBuffer(1, Math.floor(c.sampleRate * dur), c.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < data.length; i++) {
+      const x = i / c.sampleRate;
+      const env = Math.exp(-x * (name === "bang" ? 12 : 22));
+      data[i] = (Math.random() * 2 - 1) * env * (name === "bang" ? 0.7 : 0.28);
+    }
+    const src = c.createBufferSource();
+    const filter = c.createBiquadFilter();
+    filter.type = "highpass";
+    filter.frequency.value = name === "bang" ? 700 : 1200;
+    src.buffer = buf;
+    const g = c.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(name === "bang" ? 0.7 : 0.25, t + 0.004);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    src.connect(filter).connect(g).connect(master ?? c.destination);
+    src.start(t);
+    return;
+  }
   const o = c.createOscillator();
   const g = c.createGain();
-  o.type = name === "bang" || name === "blank" ? "sine" : "square";
-  const freq = name === "bang" ? 90 : name === "heartbeat" ? 60 : 420;
+  o.type = "square";
+  const freq = name === "heartbeat" ? 60 : 420;
   o.frequency.setValueAtTime(freq, t);
   o.frequency.exponentialRampToValueAtTime(Math.max(40, freq * 0.4), t + 0.18);
   g.gain.setValueAtTime(0.0001, t);

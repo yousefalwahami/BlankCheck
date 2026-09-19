@@ -3,7 +3,7 @@
 import { CHEAT_INFO, MONEY, TIMING, dollars, type ChainTx, type Fx, type PublicState } from "@blankcheck/shared";
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useState } from "react";
-import { Avatar, ChipIcon, Profit, Shell } from "../ui/bits";
+import { Avatar, ChipIcon, ConfettiBurst, Profit, Shell } from "../ui/bits";
 
 type Timed<T> = (T & { at: number }) | null;
 export type OverlayFx = {
@@ -52,7 +52,7 @@ export function Overlays({ state, fx, txs }: { state: PublicState; fx: OverlayFx
       {showRound && fx.round && (
         <motion.div key={`round-${fx.round.at}`} className={`${full} bg-black/80`} initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
           <motion.p initial={{ y: -30, opacity: 0 }} animate={{ y: 0, opacity: 1 }} className="font-crt text-[3vh] tracking-[0.5em] text-ash">
-            THE DEALER LOADS THE GUN
+            THE DEALER LOADS THE POPPER
           </motion.p>
           <motion.h2 initial={{ scale: 2.4, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ type: "spring", stiffness: 160, damping: 14 }} className="font-display text-[18vh] leading-none">
             ROUND {fx.round.round + 1}
@@ -75,14 +75,21 @@ export function Overlays({ state, fx, txs }: { state: PublicState; fx: OverlayFx
       <AnimatePresence>
         {showShot && fx.shot && (
           <motion.div key={`shot-${fx.shot.at}`} className={full} initial={{ opacity: 1 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-            {fx.shot.live && <motion.div className="absolute inset-0 bg-bone" initial={{ opacity: 0.95 }} animate={{ opacity: 0 }} transition={{ duration: 0.45 }} />}
+            {fx.shot.live && (
+              <>
+                <motion.div className="absolute inset-0 bg-[#e8b13a]" initial={{ opacity: 0.55 }} animate={{ opacity: 0 }} transition={{ duration: 0.5 }} />
+                <div className="absolute inset-0">
+                  <ConfettiBurst n={48} seed={fx.shot.at} spread={900} className="h-full w-full" />
+                </div>
+              </>
+            )}
             <motion.h2
               initial={{ scale: fx.shot.live ? 3 : 0.6, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               transition={{ type: "spring", stiffness: 300, damping: 16 }}
               className={`font-display leading-none ${fx.shot.live ? "text-[26vh] text-blood drop-shadow-[0_0_40px_rgba(224,49,43,0.7)]" : "text-[16vh] text-steel"}`}
             >
-              {fx.shot.live ? "BANG" : "click."}
+              {fx.shot.live ? "POP!" : "pfft."}
             </motion.h2>
             <p className="rounded-xl bg-black/70 px-6 py-2 font-display text-[4.5vh] tracking-wide">
               {name(fx.shot.shooter)} → {fx.shot.target === fx.shot.shooter ? "themselves" : name(fx.shot.target)}
