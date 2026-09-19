@@ -2,28 +2,32 @@ import {
   BOTS,
   Cheat,
   MAX_SEATS,
+  MONEY,
   S2C,
   TAUNTS,
   TIMING,
   randomBytes,
   type BotId,
+  type CashOutResult,
   type Challenge,
   type ChainTx,
   type Fx,
   type PasskeyAssertion,
   type TapeData,
+  type TapeMoney,
   type TauntId,
 } from "@blankcheck/shared";
 import type { Server } from "socket.io";
 import { goodMomentForCard, heuristicAim, pickAccusation, think } from "./ai/bots";
 import { readPitBoss } from "./ai/pitBoss";
 import { pickTaunt, type TauntMoment } from "./ai/taunts";
+import type { Bank, BankAccount, WalletRef } from "./bank/Bank";
 import { config } from "./config";
 import { cryptoRng, seededRng, type Rng } from "./engine/rng";
-import { isAlive, livingSeats, makeSeat, newGameState } from "./engine/rules";
+import { fundedSeats, inPlay, makeSeat, newGameState } from "./engine/rules";
 import { step } from "./engine/step";
-import type { Action, ChainCall, Effect, GameState, SeatAuth } from "./engine/types";
-import { botView, canAccuse, canCheat, pitBossView, privateView, publicView } from "./engine/views";
+import type { Action, ChainCall, Effect, GameState, SeatAuth, SeatState } from "./engine/types";
+import { botView, canAccuse, canBuyIn, canCheat, pitBossView, privateView, publicView } from "./engine/views";
 import type { Receipt, Referee, SeatCall } from "./referee/Referee";
 import { TxQueue } from "./referee/txQueue";
 import { buildTape } from "./tape";
@@ -67,17 +71,24 @@ export class Room {
   private botMoments = new Set<string>();
   private generation = 0;
   private disposed = false;
+  /** Bank wallets by stable seat key (seats renumber when someone is kicked). */
+  private accounts = new Map<string, BankAccount>();
+  private transfers: TapeMoney["transfers"] = [];
+  private payouts: Promise<unknown> = Promise.resolve();
+  private buying = new Set<string>();
+  private rebuyScheduled = new Set<string>();
 
   constructor(
     readonly code: string,
     private readonly io: Server,
     private readonly makeReferee: () => Referee,
-    hearts: number,
+    private readonly bank: Bank,
+    rounds: number,
     faceIdOnTrigger: boolean,
   ) {
     this.referee = makeReferee();
     this.rng = config.demoSeed ? seededRng(config.demoSeed) : cryptoRng();
-    this.state = newGameState(code, { hearts, faceIdOnTrigger });
+    this.state = newGameState(code, { rounds, faceIdOnTrigger });
   }
 
   get refereeMode() {
@@ -95,7 +106,8 @@ export class Room {
 
   /* ───────────── lobby ───────────── */
 
-  join(playerId: string, rawName: string): { seat: number } | { error: string } {
+  /** `passkey`: the phone has a Face ID passkey and will bind it next, so wait for that wallet. */
+  join(playerId: string, rawName: string, passkey = false): { seat: number } | { error: string } {
     const existing = this.state.seats.find((x) => x.playerId === playerId);
     if (existing) {
       existing.connected = true;
@@ -106,8 +118,10 @@ export class Room {
     if (this.state.seats.length >= MAX_SEATS) return { error: "The table is full." };
     const name = this.uniqueName(rawName.trim().slice(0, 16) || "Player");
     const seat = this.state.seats.length;
-    this.state.seats.push(makeSeat(seat, name, "human", { playerId, connected: true }));
+    const s = makeSeat(seat, name, "human", { playerId, connected: true });
+    this.state.seats.push(s);
     this.log(`${name} sat down`);
+    if (!passkey) void this.openWallet(this.key(s), { kind: "custodial", id: `player:${playerId}` });
     this.touch();
     return { seat };
   }
@@ -117,8 +131,10 @@ export class Room {
     if (this.state.seats.length >= MAX_SEATS) return "The table is full";
     const seat = this.state.seats.length;
     const name = this.uniqueName(BOTS[personality].name);
-    this.state.seats.push(makeSeat(seat, name, "bot", { personality, wallet: this.referee.hostAddress(), walletReady: true }));
+    const s = makeSeat(seat, name, "bot", { personality, wallet: this.referee.hostAddress(), walletReady: true });
+    this.state.seats.push(s);
     this.log(`${BOTS[personality].emoji} ${name} pulls up a chair`);
+    void this.botSitsDown(this.key(s));
     this.touch();
   }
 
@@ -127,11 +143,13 @@ export class Room {
     const removed = this.state.seats.splice(seat, 1)[0];
     if (!removed) return "No such seat";
     this.state.seats.forEach((x, i) => (x.seat = i));
+    // They bought in at the lobby: give the money back.
+    if (removed.chips > 0) void this.refund(this.key(removed), removed.chips * MONEY.chipCents, true);
     if (removed.playerId) this.io.to(this.playerRoom(removed.playerId)).emit(S2C.toast, { text: "The host removed you from the table." });
     this.touch();
   }
 
-  setConfig(c: { hearts?: number; faceIdOnTrigger?: boolean }): string | undefined {
+  setConfig(c: { rounds?: number; faceIdOnTrigger?: boolean }): string | undefined {
     if (this.state.phase !== "LOBBY") return "Settings are locked once the game starts";
     Object.assign(this.state.config, Object.fromEntries(Object.entries(c).filter(([, v]) => v !== undefined)));
     this.touch();
@@ -145,11 +163,14 @@ export class Room {
       const { wallet, receipt } = await this.referee.bindWallet(credentialId, publicKey);
       if (receipt) this.record("wallet", receipt, seat);
       Object.assign(s, { wallet, walletReady: true, credentialId, publicKey: publicKey.toLowerCase() });
+      // The money lives in a token account your Face ID wallet owns: nobody else can spend it.
+      await this.openWallet(this.key(s), { kind: "passkey", wallet, publicKey: publicKey.toLowerCase() });
       this.touch();
       return { wallet };
     } catch (e) {
       console.warn(`[room ${this.code}] wallet bind failed:`, e);
-      return { error: "Couldn't create your wallet. You can still play; the house key will sign for you." };
+      if (!this.accounts.has(this.key(s))) void this.openWallet(this.key(s), { kind: "custodial", id: `player:${s.playerId}` });
+      return { error: "Couldn't create your Face ID wallet. You can still play; the house holds your chips." };
     }
   }
 
@@ -177,8 +198,11 @@ export class Room {
     this.tableWallets = this.state.seats.map((x) =>
       x.kind === "human" && x.walletReady && this.state.config.faceIdOnTrigger ? x.wallet : host,
     );
+    // Same check as START, made before CREATE_TABLE is queued so a refused start never creates a table.
+    const waiting = this.state.seats.filter((x) => x.chips === 0);
+    if (waiting.length) return `Waiting for ${waiting.map((x) => x.name).join(", ")} to buy in`;
     this.enqueueChain("create", undefined, () =>
-      this.referee.createTable({ gameId, wallets: this.tableWallets, hearts: this.state.config.hearts }),
+      this.referee.createTable({ gameId, wallets: this.tableWallets, buyInChips: MONEY.buyInChips, rounds: this.state.config.rounds }),
     );
     return this.dispatch({ type: "START" });
   }
@@ -200,11 +224,27 @@ export class Room {
     this.tableAddress = null;
     this.queue = new TxQueue();
     this.referee = this.makeReferee();
+    this.transfers = [];
+    this.payouts = Promise.resolve();
+    this.rebuyScheduled.clear();
     if (config.demoSeed) this.rng = seededRng(config.demoSeed);
-    const seats = this.state.seats.map((x) => ({ ...x, hearts: 0, wallet: x.kind === "bot" ? this.referee.hostAddress() : x.wallet }));
+    const seats = this.state.seats.map((x) => ({
+      ...x,
+      chips: 0,
+      buyIns: 0,
+      cleanedOut: false,
+      wallet: x.kind === "bot" ? this.referee.hostAddress() : x.wallet,
+    }));
     this.state = newGameState(this.code, this.state.config);
     this.state.seats = seats;
-    this.log("New game. Same table. Same liars.");
+    this.log("New game. Same table. Same liars. Same wallets.");
+    // Refresh balances (the house tops up anyone under $12) and let the bots buy back in.
+    for (const s of seats) {
+      const key = this.key(s);
+      const acct = this.accounts.get(key);
+      if (!acct) continue;
+      void this.openWallet(key, acct.ref).then(() => (s.kind === "bot" ? this.botBuyIn(key) : undefined));
+    }
     this.broadcast();
   }
 
@@ -238,7 +278,7 @@ export class Room {
   async riggedStart(seat: number, accused: number): Promise<string | undefined> {
     const s = this.state;
     if (!canAccuse(s, seat)) return "You can't call RIGGED! right now";
-    if (accused === seat || !isAlive(s, accused)) return "Pick a living player";
+    if (accused === seat || !inPlay(s, accused)) return "Pick someone with chips";
     if (s.busted.includes(accused)) return "They're already BUSTED this round";
     await this.issueChallenge(seat, { kind: "accuse", round: s.round, accuser: seat, accused, auth: { type: "host" } });
     this.broadcast();
@@ -260,8 +300,171 @@ export class Room {
 
   boo(seat: number) {
     const s = this.state.seats[seat];
-    if (!s || s.hearts > 0 || this.state.phase === "LOBBY") return;
+    if (!s || s.chips > 0 || this.state.phase === "LOBBY") return;
     this.emitFx({ type: "boo", seat });
+  }
+
+  /* ───────────── money ───────────── */
+
+  private key(s: Pick<SeatState, "kind" | "name" | "playerId">): string {
+    return s.kind === "bot" ? `bot:${s.name}` : `player:${s.playerId}`;
+  }
+
+  private seatByKey(key: string): SeatState | undefined {
+    return this.state.seats.find((x) => this.key(x) === key);
+  }
+
+  /** Find or open the wallet and show its real balance (the house tops up anyone under $12). */
+  private async openWallet(key: string, ref: WalletRef): Promise<boolean> {
+    const gen = this.generation;
+    try {
+      const { account, balanceCents, receipts } = await this.bank.openWallet(ref);
+      this.accounts.set(key, account);
+      for (const rc of receipts) this.record(`bank:${key}:${rc.kind}`, rc, this.seatByKey(key)?.seat);
+      const s = this.seatByKey(key);
+      if (s && gen === this.generation && (this.state.phase === "LOBBY" || s.bankrollCents === null)) s.bankrollCents = balanceCents;
+      this.touch();
+      return true;
+    } catch (e) {
+      console.warn(`[room ${this.code}] couldn't open a wallet for ${key}:`, e);
+      const s = this.seatByKey(key);
+      if (s) this.toast(s.seat, "Couldn't open your wallet. Try rejoining.");
+      return false;
+    }
+  }
+
+  private async botSitsDown(key: string) {
+    const s = this.seatByKey(key);
+    if (!s) return;
+    if (await this.openWallet(key, { kind: "custodial", id: `${this.code}:${s.name}` })) await this.botBuyIn(key);
+  }
+
+  private async botBuyIn(key: string) {
+    const s = this.seatByKey(key);
+    if (s && canBuyIn(this.state, s.seat)) {
+      const err = await this.doBuyIn(s.seat, { type: "host" });
+      if (err) console.warn(`[room ${this.code}] ${s.name} couldn't buy in: ${err}`);
+    }
+  }
+
+  /** Step 1 of a buy-in: the phone asks, we prefetch the Face ID challenge for the $12 transfer. */
+  async buyInStart(seat: number): Promise<string | undefined> {
+    const s = this.state.seats[seat];
+    if (!s) return "No seat";
+    if (!canBuyIn(this.state, seat)) return s.chips > 0 ? "You still have chips" : "You can't buy in right now";
+    const key = this.key(s);
+    if (!this.accounts.has(key) && !s.walletReady) await this.openWallet(key, { kind: "custodial", id: `player:${s.playerId}` });
+    const account = this.accounts.get(key);
+    if (!account) return "Your wallet is still being set up. Try again in a second.";
+    const requirePasskey = account.ref.kind === "passkey";
+    let challenge = Buffer.from(randomBytes(32)).toString("base64url");
+    let prepared: unknown = undefined;
+    if (requirePasskey) {
+      try {
+        ({ challenge, prepared } = await this.bank.challengeForBuyIn(account));
+      } catch (e) {
+        console.warn(`[room ${this.code}] buy-in challenge failed:`, e);
+        return "Couldn't reach the bank for a Face ID challenge. Try again.";
+      }
+    }
+    this.challenges.set(seat, {
+      id: Buffer.from(randomBytes(9)).toString("base64url"),
+      kind: "buyin",
+      challenge,
+      requirePasskey,
+      prepared,
+      round: this.state.round,
+      shot: this.state.shot,
+    });
+    this.broadcast();
+  }
+
+  /** Step 2: the phone signed (or just tapped, for house-held wallets). */
+  async buyInSigned(seat: number, challengeId: string, assertion?: PasskeyAssertion): Promise<string | undefined> {
+    const ch = this.validChallenge(seat, challengeId, "buyin");
+    if (typeof ch === "string") return ch;
+    const auth = this.authFrom(ch, assertion);
+    if (typeof auth === "string") return auth;
+    this.challenges.delete(seat);
+    return this.doBuyIn(seat, auth);
+  }
+
+  /** Move $12 to the cashier, then put 3 chips on the table (retrying if a shot is mid-flight). */
+  private async doBuyIn(seat: number, auth: SeatAuth): Promise<string | undefined> {
+    const s = this.state.seats[seat];
+    if (!s) return "No seat";
+    const key = this.key(s);
+    const account = this.accounts.get(key);
+    if (!account) return "Your wallet isn't ready yet";
+    if (this.buying.has(key)) return "Already buying in…";
+    if (!canBuyIn(this.state, seat)) return "You can't buy in right now";
+    this.buying.add(key);
+    const gen = this.generation;
+    try {
+      const rc = await this.bank.buyIn(account, auth);
+      if (gen !== this.generation) {
+        if (rc.ok) void this.refund(key, MONEY.buyInCents);
+        return "The game changed";
+      }
+      this.record(`pay:${key}:${s.buyIns + 1}`, rc, s.seat);
+      this.transfers.push({ seat: s.seat, kind: "buyIn", cents: MONEY.buyInCents, tx: rc.signature, ok: rc.ok });
+      if (!rc.ok) return rc.error ?? "The buy-in didn't go through";
+      for (let attempt = 0; attempt < 60; attempt++) {
+        const cur = this.seatByKey(key);
+        if (gen !== this.generation || !cur) break;
+        const err = this.dispatch({ type: "BUY_IN", seat: cur.seat, paymentTx: rc.mock ? undefined : rc.signature });
+        if (!err) return undefined;
+        if (cur.chips > 0 || this.phase() === "OVER" || this.phase() === "TAPE") break;
+        await sleep(400); // mid-shot or mid-verdict: try again in a moment
+      }
+      void this.refund(key, MONEY.buyInCents);
+      return "Couldn't put your chips on the table, so your $12 was refunded";
+    } finally {
+      this.buying.delete(key);
+    }
+  }
+
+  /** `credit`: the engine had already deducted this money (a lobby buy-in), so show it back in the wallet. */
+  private async refund(key: string, cents: number, credit = false) {
+    const account = this.accounts.get(key);
+    if (!account || cents <= 0) return;
+    const rc = await this.bank.payOut(account, cents);
+    const s = this.seatByKey(key);
+    this.record(`refund:${key}:${Date.now()}`, { ...rc, kind: "REFUND" }, s?.seat);
+    if (credit && s && rc.ok && s.bankrollCents !== null) s.bankrollCents += cents;
+    this.touch();
+  }
+
+  /** Game over: the cashier pays chips × $4 to everyone still holding chips. */
+  private cashOut(results: CashOutResult[]) {
+    const gen = this.generation;
+    this.payouts = Promise.all(
+      results
+        .filter((r) => r.cashOutCents > 0)
+        .map(async (r) => {
+          const s = this.state.seats[r.seat];
+          const account = s && this.accounts.get(this.key(s));
+          if (!account) return;
+          const rc = await this.bank.payOut(account, r.cashOutCents);
+          if (gen !== this.generation) return;
+          this.record(`cashout:${r.seat}`, rc, r.seat);
+          this.transfers.push({ seat: r.seat, kind: "cashOut", cents: r.cashOutCents, tx: rc.signature, ok: rc.ok });
+        }),
+    );
+  }
+
+  private scheduleBotRebuys() {
+    for (const s of this.state.seats) {
+      if (s.kind !== "bot" || !canBuyIn(this.state, s.seat)) continue;
+      const key = this.key(s);
+      if (this.buying.has(key) || this.rebuyScheduled.has(key)) continue;
+      this.rebuyScheduled.add(key);
+      const gen = this.generation;
+      setTimeout(() => {
+        this.rebuyScheduled.delete(key);
+        if (gen === this.generation) void this.botBuyIn(key);
+      }, TIMING.botRebuyDelay * config.timeScale);
+    }
   }
 
   /* ───────────── challenges (Face ID) ───────────── */
@@ -311,9 +514,10 @@ export class Room {
 
   private isChallengeLive(seat: number, ch: PendingChallenge): boolean {
     const s = this.state;
+    if (ch.kind === "buyin") return canBuyIn(s, seat);
     if (ch.round !== s.round) return false;
     if (ch.kind === "trigger") return s.phase === "AWAIT_TRIGGER" && s.currentSeat === seat && s.aimingAt === ch.target && ch.shot === s.shot;
-    return canAccuse(s, seat) && ch.accused !== undefined && isAlive(s, ch.accused) && !s.busted.includes(ch.accused);
+    return canAccuse(s, seat) && ch.accused !== undefined && inPlay(s, ch.accused) && !s.busted.includes(ch.accused);
   }
 
   private validChallenge(seat: number, id: string, kind: Challenge["kind"]): PendingChallenge | string {
@@ -396,6 +600,9 @@ export class Room {
       case "toast":
         this.toast(e.seat, e.text);
         return;
+      case "cashOut":
+        this.cashOut(e.results);
+        return;
       case "tape":
         void this.finishTape(gen);
         return;
@@ -453,8 +660,10 @@ export class Room {
     if (this.tapeStarted) return;
     this.tapeStarted = true;
     await this.queue.drain();
+    await this.payouts;
     if (gen !== this.generation) return;
     this.tape = buildTape(this.state, this.receipts, {
+      money: { ticker: this.bank.ticker, bankMode: this.bank.mode, results: this.state.results ?? [], transfers: this.transfers },
       refereeMode: this.referee.mode,
       tableAddress: this.tableAddress,
       explorerUrl: config.explorerUrl,
@@ -470,6 +679,7 @@ export class Room {
   broadcast() {
     const pub = publicView(this.state, {
       refereeMode: this.referee.mode,
+      bankMode: this.bank.mode,
       tableAddress: this.tableAddress,
       explorerUrl: config.explorerUrl,
       onChainActions: this.onChainActions,
@@ -484,7 +694,7 @@ export class Room {
 
   /** Everything a (re)connecting TV needs to catch up. */
   snapshotFor(socketEmit: (ev: string, payload: unknown) => void) {
-    socketEmit(S2C.state, publicView(this.state, { refereeMode: this.referee.mode, tableAddress: this.tableAddress, explorerUrl: config.explorerUrl, onChainActions: this.onChainActions }));
+    socketEmit(S2C.state, publicView(this.state, { refereeMode: this.referee.mode, bankMode: this.bank.mode, tableAddress: this.tableAddress, explorerUrl: config.explorerUrl, onChainActions: this.onChainActions }));
     for (const tx of this.chainLog.slice(-12)) socketEmit(S2C.chainTx, tx);
     if (Object.keys(this.pitBoss).length) socketEmit(S2C.pitboss, this.pitBoss);
     if (this.tape) socketEmit(S2C.fx, { type: "tape", tape: this.tape } satisfies Fx);
@@ -522,6 +732,7 @@ export class Room {
     if (s.publicShots.length > prev.publicShots.length) void this.runPitBoss();
     this.scheduleBotTurn();
     this.scheduleBotSideMoves();
+    this.scheduleBotRebuys();
     this.scheduleAfk();
   }
 
@@ -601,7 +812,7 @@ export class Room {
     }
 
     if (this.state.phase === "AWAIT_AIM") {
-      if (!isAlive(this.state, aim)) aim = seat;
+      if (!inPlay(this.state, aim)) aim = seat;
       if (this.dispatch({ type: "AIM", seat, target: aim })) return;
       await sleep(r.int(700, 1300));
       if (!this.botStillUp(seat) || this.phase() !== "AWAIT_TRIGGER") return;
@@ -620,7 +831,7 @@ export class Room {
     if (s.phase !== "AWAIT_AIM" && s.phase !== "AWAIT_TRIGGER" && s.phase !== "LAST_CALL") return;
     const moment = `${s.round}:${s.shot}:${s.phase}:${s.aimingAt}:${s.countIsOff}`;
     for (const bot of s.seats) {
-      if (bot.kind !== "bot" || bot.hearts <= 0) continue;
+      if (bot.kind !== "bot" || bot.chips <= 0) continue;
       if (bot.seat === s.currentSeat && s.phase !== "LAST_CALL") continue; // its own turn is handled above
       if (!canCheat(s, bot.seat) && !canAccuse(s, bot.seat)) continue;
       const key = `${moment}:${bot.seat}`;
@@ -677,13 +888,13 @@ export class Room {
     try {
       const read = await readPitBoss(pitBossView(this.state));
       if (gen !== this.generation) return;
-      for (const seat of livingSeats(this.state)) {
+      for (const seat of fundedSeats(this.state)) {
         const next = read[seat];
         if (next === undefined) continue;
         const old = this.pitBoss[seat];
         this.pitBoss[seat] = old === undefined ? next : 0.55 * old + 0.45 * next;
       }
-      for (const seat of this.state.seats) if (seat.hearts <= 0) delete this.pitBoss[seat.seat];
+      for (const seat of this.state.seats) if (seat.chips <= 0) delete this.pitBoss[seat.seat];
       this.io.to(this.all).emit(S2C.pitboss, this.pitBoss);
     } finally {
       this.pitBossBusy = false;

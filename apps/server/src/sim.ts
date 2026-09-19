@@ -1,16 +1,18 @@
-import { randomBytes } from "@blankcheck/shared";
+import { MONEY, randomBytes } from "@blankcheck/shared";
 import { seededRng, type Rng } from "./engine/rng";
-import { makeSeat, newGameState, livingSeats, isAlive } from "./engine/rules";
+import { canAfford, fundedSeats, inPlay, makeSeat, newGameState } from "./engine/rules";
 import { step } from "./engine/step";
 import type { Action, ChainCall, GameState } from "./engine/types";
-import { canAccuse, canCheat } from "./engine/views";
+import { canAccuse, canBuyIn, canCheat } from "./engine/views";
 import { MockReferee } from "./referee/MockReferee";
 import type { Receipt, Referee } from "./referee/Referee";
 
 export type HeadlessOpts = {
   seed: string;
   seats?: number;
-  hearts?: number;
+  rounds?: number;
+  /** Chance a broke seat buys back in at each opportunity (1 = always). */
+  rebuy?: number;
   deterministicSalts?: boolean;
   gameId?: bigint;
   /** Called after every chain receipt (the chain smoke test prints these live). */
@@ -36,12 +38,14 @@ export async function playHeadless(referee: Referee, opts: HeadlessOpts) {
   const seededId = BigInt(rng.int(1, 2 ** 31));
   const gameId = opts.gameId ?? seededId; // a real chain needs a fresh table per run
   const { key, address } = await referee.prepareTable(gameId);
-  let s = newGameState("SIMS", { hearts: opts.hearts ?? 2, faceIdOnTrigger: false }, key);
+  let s = newGameState("SIMS", { rounds: opts.rounds ?? 3, faceIdOnTrigger: false }, key);
   const n = opts.seats ?? 4;
-  for (let i = 0; i < n; i++) s.seats.push(makeSeat(i, `Bot${i}`, "bot", { wallet: referee.hostAddress(), walletReady: true }));
+  for (let i = 0; i < n; i++) {
+    s.seats.push(makeSeat(i, `Bot${i}`, "bot", { wallet: referee.hostAddress(), walletReady: true, bankrollCents: MONEY.bankrollCents }));
+  }
 
   const receipts: Receipt[] = [];
-  const created = await referee.createTable({ gameId, wallets: s.seats.map((x) => x.wallet), hearts: s.config.hearts });
+  const created = await referee.createTable({ gameId, wallets: s.seats.map((x) => x.wallet), buyInChips: MONEY.buyInChips, rounds: s.config.rounds });
   receipts.push(created);
   opts.onReceipt?.(created, "createTable");
 
@@ -68,13 +72,17 @@ export async function playHeadless(referee: Referee, opts: HeadlessOpts) {
     return undefined;
   };
 
+  // Everyone buys in at the lobby ($12 → 3 chips), then the dealer starts.
+  for (const seat of s.seats) await dispatch({ type: "BUY_IN", seat: seat.seat });
   await dispatch({ type: "START" });
+  const rebuy = opts.rebuy ?? 0.8;
+  const decided = new Set<string>();
   for (let guard = 0; guard < 5000 && !tapeRequested; guard++) {
     if (thenQueue.length) {
       await dispatch(thenQueue.shift()!);
       continue;
     }
-    if (await randomMove(s, policy, dispatch)) continue;
+    if (await randomMove(s, policy, dispatch, rebuy, decided)) continue;
     if (timer) {
       const t: Action = timer;
       timer = null;
@@ -94,8 +102,16 @@ export async function simulateGame(opts: HeadlessOpts & { trace?: boolean }) {
   return { ...out, referee };
 }
 
-async function randomMove(s: GameState, p: Rng, dispatch: (a: Action) => Promise<string | undefined>): Promise<boolean> {
-  const alive = livingSeats(s);
+async function randomMove(s: GameState, p: Rng, dispatch: (a: Action) => Promise<string | undefined>, rebuy: number, decided: Set<string>): Promise<boolean> {
+  const alive = fundedSeats(s);
+  // Broke seats buy back in (sometimes they don't, so the buy-in window and early finish get exercised).
+  for (const x of s.seats) {
+    if (x.chips > 0 || !canAfford(x) || !canBuyIn(s, x.seat)) continue;
+    const k = `${x.seat}:${s.round}:${x.buyIns}`;
+    if (decided.has(k)) continue;
+    decided.add(k);
+    if (p.next() < rebuy) return !(await dispatch({ type: "BUY_IN", seat: x.seat }));
+  }
   if (s.phase === "AWAIT_AIM" || s.phase === "AWAIT_TRIGGER") {
     const roll = p.next();
     if (roll < 0.25) {
@@ -114,7 +130,7 @@ async function randomMove(s: GameState, p: Rng, dispatch: (a: Action) => Promise
       const target = p.next() < 0.4 ? s.currentSeat : p.pick(alive);
       return !(await dispatch({ type: "AIM", seat: s.currentSeat, target }));
     }
-    if (s.aimingAt !== null && isAlive(s, s.aimingAt)) return !(await dispatch({ type: "PULL", seat: s.currentSeat, auth: { type: "host" } }));
+    if (s.aimingAt !== null && inPlay(s, s.aimingAt)) return !(await dispatch({ type: "PULL", seat: s.currentSeat, auth: { type: "host" } }));
   }
   if (s.phase === "LAST_CALL" && p.next() < 0.3) {
     const accusers = alive.filter((x) => canAccuse(s, x));

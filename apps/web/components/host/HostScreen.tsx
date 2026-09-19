@@ -1,13 +1,13 @@
 "use client";
 
-import { C2S, S2C, type BotId, type ChainTx, type Fx, type PitBossReading, type PublicState, type TapeData } from "@blankcheck/shared";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { C2S, DEFAULT_ROUNDS, DEMO_ROUNDS, MAX_GAME_ROUNDS, MONEY, S2C, TIMING, dollars, type BotId, type ChainTx, type Fx, type PitBossReading, type PublicState, type TapeData } from "@blankcheck/shared";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { emitAck, getSocket, useConnected, useSocketEvent } from "@/lib/socket";
 import { resolveServerUrl } from "@/lib/serverUrl";
 import { sfx, setMuted, unlockAudio } from "@/lib/sounds";
 import { Lobby } from "./Lobby";
-import { Overlays, type OverlayFx } from "./Overlays";
-import { ShellBoard, Table, type SeatFx } from "./Table";
+import { Overlays, emptyOverlayFx, type OverlayFx } from "./Overlays";
+import { ShellBoard, Table, type Flight, type SeatFx } from "./Table";
 import { TapeView } from "./Tape";
 import { Ticker } from "./Ticker";
 
@@ -37,13 +37,15 @@ export function HostScreen() {
   const [txs, setTxs] = useState<ChainTx[]>([]);
   const [pit, setPit] = useState<PitBossReading>({});
   const [tape, setTape] = useState<TapeData | null>(null);
-  const [fx, setFx] = useState<OverlayFx>({ round: null, shot: null, mismatch: null, verdict: null, gameOver: null });
+  const [fx, setFx] = useState<OverlayFx>(emptyOverlayFx);
+  const [flights, setFlights] = useState<Flight[]>([]);
   const [taunts, setTaunts] = useState<Record<number, { text: string; at: number }>>({});
   const [seatFx, setSeatFx] = useState<Record<number, SeatFx>>({});
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [sound, setSound] = useState(false);
   const [origin, setOrigin] = useState("");
+  const flightSeq = useRef(0);
 
   useEffect(() => setOrigin(window.location.origin), []);
 
@@ -57,8 +59,11 @@ export function HostScreen() {
         if (r.ok) return;
         saveHost(null);
       }
-      const hearts = Number(new URLSearchParams(window.location.search).get("hearts")) || 3;
-      const r = await emitAck<{ room: string; hostToken: string }>(C2S.roomCreate, { hearts, faceIdOnTrigger: true });
+      // ?rounds=N picks the game length; ?demo is a short one for stage demos.
+      const q = new URLSearchParams(window.location.search);
+      const asked = Number(q.get("rounds"));
+      const rounds = asked >= 1 && asked <= MAX_GAME_ROUNDS ? Math.floor(asked) : q.has("demo") ? DEMO_ROUNDS : DEFAULT_ROUNDS;
+      const r = await emitAck<{ room: string; hostToken: string }>(C2S.roomCreate, { rounds, faceIdOnTrigger: true });
       if (r.ok) saveHost({ room: r.room, hostToken: r.hostToken });
       else setError(r.error);
     };
@@ -72,6 +77,16 @@ export function HostScreen() {
   useSocketEvent<PublicState>(S2C.state, useCallback((p) => setState(p), []));
   useSocketEvent<ChainTx>(S2C.chainTx, useCallback((t) => setTxs((prev) => (prev.some((x) => x.id === t.id) ? prev : [...prev.slice(-40), t])), []));
   useSocketEvent<PitBossReading>(S2C.pitboss, useCallback((p) => setPit({ ...p }), []));
+  const fly = useCallback((f: Omit<Flight, "id">) => {
+    const id = ++flightSeq.current;
+    setFlights((x) => [...x.slice(-12), { ...f, id }]);
+    setTimeout(() => setFlights((x) => x.filter((y) => y.id !== id)), 2200 + (f.delay ?? 0) * 1000);
+  }, []);
+  const stateRef = useRef(state);
+  useEffect(() => {
+    stateRef.current = state;
+  }, [state]);
+
   useSocketEvent<Fx>(
     S2C.fx,
     useCallback((f: Fx) => {
@@ -86,8 +101,10 @@ export function HostScreen() {
         case "shot":
           setFx((x) => ({ ...x, shot: { ...f, at } }));
           setSeatFx((x) => ({ ...x, [f.target]: { kind: f.live ? "hit" : "miss", at } }));
-          if (f.live) sfx.bang();
-          else sfx.blank();
+          if (f.live) {
+            sfx.bang();
+            fly({ from: f.target, to: "pot", n: 1, delay: 0.5 });
+          } else sfx.blank();
           break;
         case "mismatch":
           setFx((x) => ({ ...x, mismatch: { ...f, at } }));
@@ -100,6 +117,32 @@ export function HostScreen() {
           setFx((x) => ({ ...x, verdict: { ...f, at } }));
           sfx.gavel();
           setTimeout(() => sfx.shatter(), 700);
+          // The RIGGED! scene shows the handover; mirror it on the felt once the scene clears.
+          if (f.chips > 0) fly({ from: f.from, to: f.to, n: f.chips, delay: TIMING.verdictShow / 1000 });
+          break;
+        case "potAward":
+          setFx((x) => ({ ...x, potAward: { ...f, at } }));
+          f.winners.forEach((w, i) => fly({ from: "pot", to: w, n: f.chipsEach, delay: 0.3 + i * 0.25 }));
+          if (f.winners.length) sfx.stamp();
+          break;
+        case "buyIn":
+          setSeatFx((x) => ({ ...x, [f.seat]: { kind: "buyIn", at } }));
+          setFx((x) => ({ ...x, banner: { seat: f.seat, label: `💵 buys in: ${dollars(f.cents)} → ${f.chips} chips`, tone: "money", at } }));
+          sfx.tick();
+          break;
+        case "broke":
+          setFx((x) => ({
+            ...x,
+            banner: {
+              seat: f.seat,
+              label: f.cleanedOut ? "💀 is cleaned out" : `💸 is broke · ${dollars(MONEY.buyInCents)} to buy back in`,
+              tone: "bad",
+              at,
+            },
+          }));
+          break;
+        case "buyInWindow":
+          sfx.tick();
           break;
         case "lastCall":
           sfx.tick();
@@ -119,7 +162,7 @@ export function HostScreen() {
           sfx.boo();
           break;
       }
-    }, []),
+    }, [fly]),
   );
 
   const serverUrl = useMemo(() => (origin ? resolveServerUrl() : ""), [origin]);
@@ -144,7 +187,8 @@ export function HostScreen() {
   const restart = async () => {
     setTape(null);
     setTxs([]);
-    setFx({ round: null, shot: null, mismatch: null, verdict: null, gameOver: null });
+    setFx(emptyOverlayFx);
+    setFlights([]);
     await act(C2S.gameRestart);
   };
 
@@ -180,6 +224,10 @@ export function HostScreen() {
         return "RIGGED!";
       case "LAST_CALL":
         return "The gun is empty.";
+      case "ROUND_END":
+        return `Round ${state.round + 1} of ${state.config.rounds} is over. Paying out the pot…`;
+      case "BUY_INS":
+        return "Not enough chips on the table. Buy back in!";
       case "OVER":
       case "TAPE":
         return "Game over.";
@@ -228,10 +276,10 @@ export function HostScreen() {
             <p className="font-display text-[4vh] tracking-wide">{caption}</p>
           </header>
           <section className="relative min-h-0 flex-1">
-            <Table state={state} pit={pit} taunts={taunts} seatFx={seatFx} />
+            <Table state={state} pit={pit} taunts={taunts} seatFx={seatFx} flights={flights} />
             <aside className="absolute right-[1.5vw] top-0 hidden max-h-[16vh] w-[22vw] flex-col justify-end gap-0.5 overflow-hidden text-right font-crt text-[1.8vh] leading-tight text-ash xl:flex">
               {state.log.slice(-4).map((e) => (
-                <p key={e.id} className={e.kind === "verdict" || e.kind === "rigged" ? "text-blood" : e.kind === "mismatch" ? "text-brass" : ""}>
+                <p key={e.id} className={e.kind === "verdict" || e.kind === "rigged" ? "text-blood" : e.kind === "mismatch" ? "text-brass" : e.kind === "money" ? "text-crt" : ""}>
                   {e.text}
                 </p>
               ))}

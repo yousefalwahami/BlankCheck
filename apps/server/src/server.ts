@@ -19,6 +19,8 @@ import { jevEnabled, jevStats } from "./ai/jev";
 import { config } from "./config";
 import { createReferee } from "./referee";
 import type { Referee } from "./referee/Referee";
+import type { Bank } from "./bank/Bank";
+import { MockBank } from "./bank/MockBank";
 import { newRoomCode, Room } from "./rooms";
 
 type SocketData = { role?: "tv" | "phone"; room?: string; playerId?: string };
@@ -47,8 +49,10 @@ function on<S extends z.ZodType, R extends object>(
   });
 }
 
-export function createGameServer(opts: { makeReferee?: () => Referee } = {}) {
+export function createGameServer(opts: { makeReferee?: () => Referee; bank?: Bank } = {}) {
   const makeReferee = opts.makeReferee ?? createReferee;
+  // One bank for the whole server: a phone keeps its wallet from game to game.
+  const bank = opts.bank ?? new MockBank();
   const rooms = new Map<string, Room>();
 
   const http = createServer((req, res) => {
@@ -61,6 +65,7 @@ export function createGameServer(opts: { makeReferee?: () => Referee } = {}) {
           name: "blank-check",
           rooms: rooms.size,
           refereeMode: config.refereeMode,
+          bankMode: bank.mode,
           waitForChain: config.waitForChain,
           jev: jevEnabled() ? { ...jevStats } : false,
           demo: !!config.demoSeed,
@@ -93,12 +98,12 @@ export function createGameServer(opts: { makeReferee?: () => Referee } = {}) {
 
     on(socket, C2S.roomCreate, RoomCreateSchema, (d) => {
       const code = newRoomCode((c) => rooms.has(c));
-      const r = new Room(code, io, makeReferee, d.hearts, d.faceIdOnTrigger);
+      const r = new Room(code, io, makeReferee, bank, d.rounds, d.faceIdOnTrigger);
       rooms.set(code, r);
       Object.assign(data, { role: "tv", room: code });
       socket.join(r.all);
       r.snapshotFor((ev, p) => socket.emit(ev, p));
-      console.log(`[room ${code}] created (${r.refereeMode})`);
+      console.log(`[room ${code}] created (referee ${r.refereeMode}, bank ${bank.mode})`);
       return { ok: true, room: code, hostToken: r.hostToken };
     });
 
@@ -132,7 +137,7 @@ export function createGameServer(opts: { makeReferee?: () => Referee } = {}) {
       if (!r) return "No room with that code";
       socket.join(r.all);
       socket.join(r.playerRoom(d.playerId));
-      const res = r.join(d.playerId, d.name);
+      const res = r.join(d.playerId, d.name, d.passkey ?? false);
       if ("error" in res) {
         socket.leave(r.all);
         socket.leave(r.playerRoom(d.playerId));
@@ -173,6 +178,16 @@ export function createGameServer(opts: { makeReferee?: () => Referee } = {}) {
     on(socket, C2S.riggedSigned, SignedSchema, (d) => {
       const me = mySeat();
       return me ? me.r.signedRigged(me.seat, d.challengeId, d.assertion) : "Join a room first";
+    });
+
+    on(socket, C2S.buyInStart, Empty, async () => {
+      const me = mySeat();
+      return me ? me.r.buyInStart(me.seat) : "Join a room first";
+    });
+
+    on(socket, C2S.buyInSigned, SignedSchema, async (d) => {
+      const me = mySeat();
+      return me ? me.r.buyInSigned(me.seat, d.challengeId, d.assertion) : "Join a room first";
     });
 
     on(socket, C2S.riggedCancel, Empty, () => {

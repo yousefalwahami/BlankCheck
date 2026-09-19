@@ -6,6 +6,29 @@ export const MAX_WINDOWS = 16; /* seal windows per round (shots + flushes) */
 export const MAX_SHELLS = 8;
 export const MIN_SHELLS = 2;
 
+/*
+ * Money. Chips are the table currency; fake dollars live in each player's wallet (a Thru token,
+ * or an in-memory bank offline). $12 buys 3 chips; cashing out pays $4 a chip.
+ */
+export const MONEY = {
+  ticker: "BCUSD",
+  decimals: 2,
+  chipCents: 400,
+  buyInChips: 3,
+  buyInCents: 1200,
+  /** Every new wallet is funded with this much play money (5 buy-ins). */
+  bankrollCents: 6000,
+} as const;
+
+export const DEFAULT_ROUNDS = 5;
+export const DEMO_ROUNDS = 3;
+export const MAX_GAME_ROUNDS = 12;
+
+export function dollars(cents: number): string {
+  const sign = cents < 0 ? "−" : "";
+  return `${sign}$${(Math.abs(cents) / 100).toFixed(Math.abs(cents) % 100 === 0 ? 0 : 2)}`;
+}
+
 /** Shell index meaning "no shell" in an envelope preimage. */
 export const NO_SHELL = 0xff;
 /** Seat index meaning "nobody" on-chain. */
@@ -44,6 +67,8 @@ export const IX = {
   ACCUSE: 5,
   REVEAL: 6,
   REVEAL_SHELLS: 7,
+  BUY_IN: 8,
+  END_ROUND: 9,
 } as const;
 
 /** 16-byte event kinds emitted by the referee. */
@@ -58,6 +83,8 @@ export const EVT = {
   ENVELOPE_OPENED: 8,
   SHELLS_REVEALED: 9,
   GAME_OVER: 10,
+  BUY_IN: 11,
+  POT_AWARDED: 12,
 } as const;
 
 export const TABLE_STATUS = { LOBBY: 0, PLAYING: 1, FINISHED: 2 } as const;
@@ -72,7 +99,12 @@ export const TIMING = {
   peekVisible: 2000,
   botThinkMin: 1100,
   botThinkMax: 2200,
-  gameOverToTape: 2500,
+  /** Long enough to read the cash-out table before the tape rolls. */
+  gameOverToTape: 7000,
+  potAward: 2600,
+  /** Between rounds, how long to wait for broke players to buy back in. */
+  buyInWindow: 20000,
+  botRebuyDelay: 1500,
 } as const;
 
 export const BOT_IDS = ["accountant", "gary", "mercy", "intern"] as const;

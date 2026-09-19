@@ -6,7 +6,7 @@
 
 /* BLANK CHECK referee: see blank_check.h. The stack is small (4 KiB), so no big locals. */
 
-static uchar const BC_MAGIC[4] = { 'B', 'C', 'K', '1' };
+static uchar const BC_MAGIC[4] = { 'B', 'C', 'K', '2' };
 
 /* ───────────── hashing ───────────── */
 
@@ -42,6 +42,11 @@ bc_addrs( void ) {
   return tsdk_txn_get_acct_addrs( tsdk_get_txn() );
 }
 
+static uchar
+bc_u8( ulong v ) {
+  return (uchar)( v > 255UL ? 255UL : v );
+}
+
 static void
 bc_emit( bc_table_t const * t, uchar kind, uchar round, uchar window_or_shot, uchar seat_a, uchar seat_b, uchar value, uchar value2 ) {
   bc_event_t e;
@@ -65,39 +70,46 @@ bc_clear_pending( bc_table_t * t ) {
   t->pending_accused = BC_NONE;
 }
 
-/* Must match nextLiving() in apps/server/src/engine/rules.ts. */
+/* Next seat with chips clockwise. Must match nextFunded() in apps/server/src/engine/rules.ts. */
 static uchar
 bc_next_seat( bc_table_t const * t, uchar from ) {
   for( uint i = 1U; i <= t->num_seats; i++ ) {
     uchar c = (uchar)( ( from + i ) % t->num_seats );
-    if( t->hearts[c] > 0 ) return c;
+    if( t->chips[c] > 0 ) return c;
   }
   return from;
 }
 
-/* If one player is left, the game is over. Returns 1 if it just ended. */
-static int
-bc_check_game_over( bc_table_t * t ) {
-  uint  alive = 0U;
-  uchar last  = BC_NONE;
-  for( uchar i = 0; i < t->num_seats; i++ ) {
-    if( t->hearts[i] > 0 ) {
-      alive++;
-      last = i;
+static uint
+bc_funded( bc_table_t const * t ) {
+  uint k = 0U;
+  for( uchar i = 0; i < t->num_seats; i++ ) if( t->chips[i] > 0 ) k++;
+  return k;
+}
+
+/* The game is over: the winner is the biggest profit in chips (chips − buy-ins × chips per buy-in),
+   the lowest seat on a tie. Must match gameOver() in apps/server/src/engine/step.ts. */
+static void
+bc_finish( bc_table_t * t, uchar early ) {
+  uchar best        = 0;
+  long  best_profit = (long)t->chips[0] - (long)t->buy_ins[0] * (long)t->buy_in_chips;
+  for( uchar i = 1; i < t->num_seats; i++ ) {
+    long p = (long)t->chips[i] - (long)t->buy_ins[i] * (long)t->buy_in_chips;
+    if( p > best_profit ) {
+      best        = i;
+      best_profit = p;
     }
   }
-  if( alive > 1U ) return 0;
   t->status = BC_STATUS_FINISHED;
-  t->winner = last;
-  bc_emit( t, BC_EVT_GAME_OVER, t->round, 0, last, BC_NONE, 0, 0 );
-  return 1;
+  t->winner = best;
+  bc_emit( t, BC_EVT_GAME_OVER, t->round, 0, best, BC_NONE, early, 0 );
 }
 
 static void
 bc_store_envelopes( bc_table_t * t, uchar round, uchar window, uchar const * env, uchar n ) {
   for( uchar i = 0; i < n; i++ ) memcpy( t->env[round][window][i], env + 32UL * i, 32UL );
-  t->window               = (uchar)( window + 1 );
-  t->window_count[round]  = (uchar)( window + 1 );
+  t->window              = (uchar)( window + 1 );
+  t->window_count[round] = (uchar)( window + 1 );
 }
 
 static void
@@ -129,12 +141,15 @@ bc_load_table( ushort table_idx ) {
 
 static void
 bc_create_table( uchar const * ix, ulong sz, ushort table_idx ) {
-  if( sz < 16UL ) tsdk_revert( BC_ERR_SHORT );
-  ulong game_id = TSDK_LOAD( ulong, ix + 6 );
-  uchar n       = ix[14];
-  uchar hearts  = ix[15];
-  if( n < 2U || n > BC_MAX_SEATS || hearts < 1U || hearts > BC_MAX_HEARTS ) tsdk_revert( BC_ERR_ARGS );
-  ulong wallets_end = 16UL + 32UL * n;
+  if( sz < 17UL ) tsdk_revert( BC_ERR_SHORT );
+  ulong game_id      = TSDK_LOAD( ulong, ix + 6 );
+  uchar n            = ix[14];
+  uchar buy_in_chips = ix[15];
+  uchar rounds       = ix[16];
+  if( n < 2U || n > BC_MAX_SEATS || buy_in_chips < 1U || buy_in_chips > BC_MAX_BUY_IN_CHIPS || rounds < 1U || rounds > BC_MAX_ROUNDS ) {
+    tsdk_revert( BC_ERR_ARGS );
+  }
+  ulong wallets_end = 17UL + 32UL * n;
   if( sz < wallets_end + 4UL ) tsdk_revert( BC_ERR_SHORT );
   uint proof_sz = TSDK_LOAD( uint, ix + wallets_end );
   if( sz != wallets_end + 4UL + proof_sz ) tsdk_revert( BC_ERR_SHORT );
@@ -156,15 +171,18 @@ bc_create_table( uchar const * ix, ulong sz, ushort table_idx ) {
   t->game_id      = game_id;
   t->status       = BC_STATUS_PLAYING;
   t->num_seats    = n;
-  t->start_hearts = hearts;
+  t->buy_in_chips = buy_in_chips;
+  t->rounds_total = rounds;
   t->round        = BC_NONE;
+  t->round_ended  = 1;
   bc_clear_pending( t );
   t->winner = BC_NONE;
   for( uchar i = 0; i < n; i++ ) {
-    t->hearts[i] = hearts;
-    memcpy( t->seat_wallet[i], ix + 16UL + 32UL * i, 32UL );
+    t->chips[i]   = buy_in_chips; /* everyone bought in at the lobby */
+    t->buy_ins[i] = 1;
+    memcpy( t->seat_wallet[i], ix + 17UL + 32UL * i, 32UL );
   }
-  bc_emit( t, BC_EVT_TABLE_CREATED, 0, 0, BC_NONE, BC_NONE, n, hearts );
+  bc_emit( t, BC_EVT_TABLE_CREATED, 0, 0, BC_NONE, BC_NONE, n, buy_in_chips );
 }
 
 static void
@@ -175,25 +193,19 @@ bc_commit_round( bc_table_t * t, uchar const * ix, ulong sz ) {
   if( t->status != BC_STATUS_PLAYING ) tsdk_revert( BC_ERR_STATUS );
   uchar cur = t->round;
   if( round != ( cur == BC_NONE ? 0U : (uint)cur + 1U ) ) tsdk_revert( BC_ERR_ROUND );
-  if( cur != BC_NONE ) {
-    if( t->shot < t->shell_count[cur] ) tsdk_revert( BC_ERR_SHOT );
-    if( t->trigger_pulled || t->pending_accused != BC_NONE ) tsdk_revert( BC_ERR_PENDING );
-  }
+  if( !t->round_ended ) tsdk_revert( BC_ERR_ROUND );
   if( shell_count == 0U ) {
-    /* Out of round slots: most hearts wins (lowest seat on a tie). */
-    uchar best = 0;
-    for( uchar i = 1; i < t->num_seats; i++ ) if( t->hearts[i] > t->hearts[best] ) best = i;
-    t->status = BC_STATUS_FINISHED;
-    t->winner = best;
-    bc_emit( t, BC_EVT_GAME_OVER, t->round, 0, best, BC_NONE, 1, 0 );
+    /* Not enough players with money left: cash out early. */
+    bc_finish( t, 1 );
     return;
   }
-  if( round >= BC_MAX_ROUNDS ) tsdk_revert( BC_ERR_ROUND );
+  if( round >= BC_MAX_ROUNDS || round >= t->rounds_total ) tsdk_revert( BC_ERR_ROUND );
   if( shell_count < BC_MIN_SHELLS || shell_count > BC_MAX_SHELLS || live_count < 1U || live_count >= shell_count ) {
     tsdk_revert( BC_ERR_ARGS );
   }
-  if( first_seat >= t->num_seats || t->hearts[first_seat] == 0 ) tsdk_revert( BC_ERR_TURN );
-  t->round = round;
+  if( first_seat >= t->num_seats || t->chips[first_seat] == 0 ) tsdk_revert( BC_ERR_TURN );
+  t->round       = round;
+  t->round_ended = 0;
   memcpy( t->shells_commit[round], ix + 10, 32UL );
   t->shell_count[round]  = shell_count;
   t->live_count[round]   = live_count;
@@ -213,10 +225,10 @@ bc_pull_trigger( bc_table_t * t, uchar const * ix, ulong sz ) {
   ushort wallet_idx = TSDK_LOAD( ushort, ix + 6 );
   uchar round = ix[8], shot = ix[9], shooter = ix[10], target = ix[11];
   if( t->status != BC_STATUS_PLAYING ) tsdk_revert( BC_ERR_STATUS );
-  if( t->round == BC_NONE || round != t->round ) tsdk_revert( BC_ERR_ROUND );
+  if( t->round == BC_NONE || round != t->round || t->round_ended ) tsdk_revert( BC_ERR_ROUND );
   if( shot != t->shot || shot >= t->shell_count[round] ) tsdk_revert( BC_ERR_SHOT );
   if( shooter >= t->num_seats || target >= t->num_seats ) tsdk_revert( BC_ERR_ARGS );
-  if( shooter != t->current_seat || t->hearts[shooter] == 0 || t->hearts[target] == 0 ) tsdk_revert( BC_ERR_TURN );
+  if( shooter != t->current_seat || t->chips[shooter] == 0 || t->chips[target] == 0 ) tsdk_revert( BC_ERR_TURN );
   if( t->trigger_pulled || t->pending_accused != BC_NONE ) tsdk_revert( BC_ERR_PENDING );
   bc_require_seat( t, wallet_idx, shooter );
   t->trigger_pulled = 1;
@@ -238,16 +250,18 @@ bc_resolve_shot( bc_table_t * t, uchar const * ix, ulong sz ) {
   if( is_live > 1U ) tsdk_revert( BC_ERR_ARGS );
   uchar shooter = t->current_seat;
   uchar target  = t->pending_target;
-  if( is_live && t->hearts[target] > 0 ) t->hearts[target]--;
+  /* A live hit knocks one chip into the pot. */
+  if( is_live && t->chips[target] > 0 ) {
+    t->chips[target]--;
+    t->pot++;
+  }
   bc_store_envelopes( t, round, window, ix + 11, n );
   t->shot           = (uchar)( shot + 1 );
   t->trigger_pulled = 0;
   t->pending_target = BC_NONE;
-  bc_emit( t, BC_EVT_SHOT_RESOLVED, round, shot, shooter, target, is_live, t->hearts[target] );
-  if( !bc_check_game_over( t ) ) {
-    /* A blank on yourself means you go again; otherwise the next living seat clockwise. */
-    if( !( is_live == 0 && target == shooter ) ) t->current_seat = bc_next_seat( t, shooter );
-  }
+  bc_emit( t, BC_EVT_SHOT_RESOLVED, round, shot, shooter, target, is_live, bc_u8( t->chips[target] ) );
+  /* A blank on yourself means you go again; otherwise the next seat with chips. */
+  if( !( is_live == 0 && target == shooter ) ) t->current_seat = bc_next_seat( t, shooter );
 }
 
 static void
@@ -270,9 +284,9 @@ bc_accuse( bc_table_t * t, uchar const * ix, ulong sz ) {
   ushort wallet_idx = TSDK_LOAD( ushort, ix + 6 );
   uchar round = ix[8], accuser = ix[9], accused = ix[10];
   if( t->status != BC_STATUS_PLAYING ) tsdk_revert( BC_ERR_STATUS );
-  if( round != t->round ) tsdk_revert( BC_ERR_ROUND );
+  if( round != t->round || t->round_ended ) tsdk_revert( BC_ERR_ROUND );
   if( accuser >= t->num_seats || accused >= t->num_seats || accuser == accused ) tsdk_revert( BC_ERR_ARGS );
-  if( t->hearts[accuser] == 0 || t->hearts[accused] == 0 ) tsdk_revert( BC_ERR_TURN );
+  if( t->chips[accuser] == 0 || t->chips[accused] == 0 ) tsdk_revert( BC_ERR_TURN );
   if( t->accuse_used[accuser] || t->busted[accused] ) tsdk_revert( BC_ERR_ACCUSE );
   if( t->pending_accused != BC_NONE || t->trigger_pulled ) tsdk_revert( BC_ERR_PENDING );
   bc_require_seat( t, wallet_idx, accuser );
@@ -282,7 +296,7 @@ bc_accuse( bc_table_t * t, uchar const * ix, ulong sz ) {
   bc_emit( t, BC_EVT_ACCUSED, round, t->window, accuser, accused, 0, 0 );
 }
 
-/* mode 0 (verdict): open the accused's envelopes for this round and hand out the heart.
+/* mode 0 (verdict): open the accused's envelopes for this round and move the chips.
    mode 1 (tape):    after the game, open any seat's envelopes for any round. */
 static void
 bc_reveal( bc_table_t * t, uchar const * ix, ulong sz, ushort table_idx ) {
@@ -316,16 +330,18 @@ bc_reveal( bc_table_t * t, uchar const * ix, ulong sz, ushort table_idx ) {
   }
 
   if( mode == 0U ) {
-    uchar accuser = t->pending_accuser;
-    uchar loser   = guilty ? seat : accuser;
-    if( t->hearts[loser] > 0 ) t->hearts[loser]--;
+    /* Guilty: the accuser takes ALL of the cheater's chips. Wrong call: the accuser pays one. */
+    uchar  accuser = t->pending_accuser;
+    uchar  from    = guilty ? seat : accuser;
+    uchar  to      = guilty ? accuser : seat;
+    ushort moved   = guilty ? t->chips[seat] : (ushort)( t->chips[accuser] > 0 ? 1 : 0 );
+    t->chips[from] = (ushort)( t->chips[from] - moved );
+    t->chips[to]   = (ushort)( t->chips[to] + moved );
     if( guilty ) t->busted[seat] = 1;
     bc_clear_pending( t );
-    bc_emit( t, BC_EVT_VERDICT, round, t->window, accuser, seat, guilty, loser );
-    if( !bc_check_game_over( t ) ) {
-      /* A shooter eliminated by a verdict passes the gun on. */
-      if( t->hearts[t->current_seat] == 0 ) t->current_seat = bc_next_seat( t, t->current_seat );
-    }
+    bc_emit( t, BC_EVT_VERDICT, round, t->window, accuser, seat, guilty, bc_u8( moved ) );
+    /* A shooter who went broke in a verdict passes the gun on. */
+    if( t->chips[t->current_seat] == 0 ) t->current_seat = bc_next_seat( t, t->current_seat );
   }
 }
 
@@ -352,6 +368,54 @@ bc_reveal_shells( bc_table_t * t, uchar const * ix, ulong sz, ushort table_idx )
   bc_emit( t, BC_EVT_SHELLS_REVEALED, round, 0, BC_NONE, BC_NONE, n, live );
 }
 
+/* A broke seat paid $12 (the token transfer's signature rides along in `payment`) for more chips. */
+static void
+bc_buy_in( bc_table_t * t, uchar const * ix, ulong sz ) {
+  if( sz != BC_HDR_SZ + 2UL + 64UL ) tsdk_revert( BC_ERR_SHORT );
+  bc_require_host( t );
+  uchar round = ix[6], seat = ix[7];
+  if( t->status != BC_STATUS_PLAYING ) tsdk_revert( BC_ERR_STATUS );
+  if( t->round == BC_NONE || round != t->round ) tsdk_revert( BC_ERR_ROUND );
+  if( seat >= t->num_seats ) tsdk_revert( BC_ERR_ARGS );
+  if( t->chips[seat] != 0 ) tsdk_revert( BC_ERR_CHIPS );
+  if( t->trigger_pulled || t->pending_accused != BC_NONE ) tsdk_revert( BC_ERR_PENDING );
+  t->chips[seat]   = t->buy_in_chips;
+  t->buy_ins[seat] = bc_u8( (ulong)t->buy_ins[seat] + 1UL );
+  bc_emit( t, BC_EVT_BUY_IN, round, 0, seat, BC_NONE, t->buy_in_chips, t->buy_ins[seat] );
+}
+
+/* The pot goes to the chip leader(s); an uneven split leaves the remainder in the pot.
+   After the last round the game is over. Must match endRound() in apps/server/src/engine/step.ts. */
+static void
+bc_end_round( bc_table_t * t, uchar const * ix, ulong sz ) {
+  if( sz != BC_HDR_SZ + 1UL ) tsdk_revert( BC_ERR_SHORT );
+  bc_require_host( t );
+  uchar round = ix[6];
+  if( t->status != BC_STATUS_PLAYING ) tsdk_revert( BC_ERR_STATUS );
+  if( t->round == BC_NONE || round != t->round || t->round_ended ) tsdk_revert( BC_ERR_ROUND );
+  if( t->trigger_pulled || t->pending_accused != BC_NONE ) tsdk_revert( BC_ERR_PENDING );
+  if( t->shot < t->shell_count[round] && bc_funded( t ) >= 2U ) tsdk_revert( BC_ERR_SHOT );
+
+  ushort max = 0;
+  for( uchar i = 0; i < t->num_seats; i++ ) if( t->chips[i] > max ) max = t->chips[i];
+  uchar mask  = 0;
+  uint  count = 0U;
+  if( max > 0 ) {
+    for( uchar i = 0; i < t->num_seats; i++ ) {
+      if( t->chips[i] == max ) {
+        mask = (uchar)( mask | ( 1U << i ) );
+        count++;
+      }
+    }
+  }
+  ushort each = count ? (ushort)( t->pot / count ) : 0;
+  for( uchar i = 0; i < t->num_seats; i++ ) if( mask & ( 1U << i ) ) t->chips[i] = (ushort)( t->chips[i] + each );
+  t->pot         = (ushort)( t->pot - each * count );
+  t->round_ended = 1;
+  bc_emit( t, BC_EVT_POT_AWARDED, round, 0, mask, BC_NONE, bc_u8( each ), bc_u8( t->pot ) );
+  if( (uint)round + 1U >= t->rounds_total ) bc_finish( t, 0 );
+}
+
 /* The VM passes instruction bytes in a0/a1, both for top-level calls and for CPI
    (e.g. passkey-manager `validate` invoking us), so read them from the arguments. */
 TSDK_ENTRYPOINT_FN void
@@ -376,6 +440,8 @@ start( void const * instr, ulong sz ) {
     case BC_IX_ACCUSE:        bc_accuse( t, ix, sz );                   break;
     case BC_IX_REVEAL:        bc_reveal( t, ix, sz, table_idx );        break;
     case BC_IX_REVEAL_SHELLS: bc_reveal_shells( t, ix, sz, table_idx ); break;
+    case BC_IX_BUY_IN:        bc_buy_in( t, ix, sz );                   break;
+    case BC_IX_END_ROUND:     bc_end_round( t, ix, sz );                break;
     default:                  tsdk_revert( BC_ERR_BAD_IX );
   }
   tsdk_return( TSDK_SUCCESS );

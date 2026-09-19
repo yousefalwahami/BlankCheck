@@ -10,8 +10,10 @@ const FIELDS = [
   ["gameId", 8],
   ["status", 1],
   ["numSeats", 1],
-  ["startHearts", 1],
+  ["buyInChips", 1],
+  ["roundsTotal", 1],
   ["round", 1],
+  ["roundEnded", 1],
   ["currentSeat", 1],
   ["shot", 1],
   ["window", 1],
@@ -20,7 +22,9 @@ const FIELDS = [
   ["pendingAccuser", 1],
   ["pendingAccused", 1],
   ["winner", 1],
-  ["hearts", MAX_SEATS],
+  ["pot", 2], // u16
+  ["chips", MAX_SEATS * 2], // u16 each
+  ["buyIns", MAX_SEATS],
   ["busted", MAX_SEATS],
   ["accuseUsed", MAX_SEATS],
   ["seatWallet", MAX_SEATS * 32],
@@ -43,8 +47,8 @@ export const TABLE_OFFSETS = (() => {
   return o;
 })();
 
-export const TABLE_SIZE = FIELDS.reduce((n, [, size]) => n + size, 0); // 74834
-export const TABLE_MAGIC = [0x42, 0x43, 0x4b, 0x31]; // "BCK1"
+export const TABLE_SIZE = FIELDS.reduce((n, [, size]) => n + size, 0); // 74850
+export const TABLE_MAGIC = [0x42, 0x43, 0x4b, 0x32]; // "BCK2" (chips edition)
 export const ROUND_NONE = 0xff;
 
 export function envOffset(round: number, window: number, seat: number): number {
@@ -55,12 +59,15 @@ export type ParsedTable = {
   gameId: bigint;
   status: number;
   numSeats: number;
+  roundsTotal: number;
   round: number;
   currentSeat: number;
   shot: number;
   window: number;
   winner: number;
-  hearts: number[];
+  pot: number;
+  chips: number[];
+  buyIns: number[];
   shellsCommit: (round: number) => Uint8Array;
   shellCount: (round: number) => number;
   windowCount: (round: number) => number;
@@ -77,12 +84,15 @@ export function parseTable(data: Uint8Array): ParsedTable | null {
     gameId: dv.getBigUint64(O.gameId, true),
     status: data[O.status],
     numSeats: data[O.numSeats],
+    roundsTotal: data[O.roundsTotal],
     round: data[O.round],
     currentSeat: data[O.currentSeat],
     shot: data[O.shot],
     window: data[O.window],
     winner: data[O.winner],
-    hearts: Array.from(data.subarray(O.hearts, O.hearts + MAX_SEATS)),
+    pot: dv.getUint16(O.pot, true),
+    chips: Array.from({ length: MAX_SEATS }, (_, i) => dv.getUint16(O.chips + 2 * i, true)),
+    buyIns: Array.from(data.subarray(O.buyIns, O.buyIns + MAX_SEATS)),
     shellsCommit: (r) => data.slice(O.shellsCommit + r * 32, O.shellsCommit + r * 32 + 32),
     shellCount: (r) => data[O.shellCount + r],
     windowCount: (r) => data[O.windowCount + r],

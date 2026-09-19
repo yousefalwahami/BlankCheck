@@ -7,7 +7,7 @@ export type ChainCheck = { ok: boolean; label: string };
 
 /**
  * Independent check for Review the Tape: read the Table account straight from a Thru RPC node
- * (not from our game server) and compare every sealed envelope hash and shell commitment.
+ * (not from our game server) and compare every sealed envelope hash, shell commitment, and final chip count.
  */
 export function useChainCheck(tape: TapeData): ChainCheck | null {
   const [check, setCheck] = useState<ChainCheck | null>(null);
@@ -33,7 +33,12 @@ export function useChainCheck(tape: TapeData): ChainCheck | null {
             if (toHex(t.env(r.round, e.window, e.seat)) === e.hash) good++;
           }
         }
-        if (!cancelled) setCheck({ ok: good === total, label: `⛓ ${good}/${total} hashes match the Table account on Thru` });
+        // The final chip counts (what everyone cashed out) are on the Table account too.
+        for (const x of tape.money.results) {
+          total++;
+          if (t.chips[x.seat] === x.chips && t.buyIns[x.seat] === x.buyIns) good++;
+        }
+        if (!cancelled) setCheck({ ok: good === total, label: `⛓ ${good}/${total} hashes and chip counts match the Table account on Thru` });
       } catch (e) {
         if (!cancelled) setCheck({ ok: false, label: `⛓ couldn't read the chain: ${(e as Error).message}` });
       }

@@ -38,7 +38,9 @@ function round(): TapeRound {
       { window: 1, seat: 0, cheat: 4, shell: 1, salt: toHex(salt), hash: toHex(envelopeHash(table, 0, 1, 0, 4, 1, salt)), caught: true },
       { window: 1, seat: 1, cheat: 0, shell: 0xff, salt: toHex(salt), hash: toHex(envelopeHash(table, 0, 1, 1, 0, 0xff, salt)), caught: false },
     ],
-    accusations: [{ accuser: 1, accused: 0, verdict: "GUILTY", window: 2 }],
+    accusations: [{ accuser: 1, accused: 0, verdict: "GUILTY", window: 2, chipsMoved: 3 }],
+    buyIns: [{ seat: 0 }],
+    pot: { winners: [1], chipsEach: 2, carried: 0 },
   };
 }
 
@@ -75,6 +77,16 @@ describe("tape verification", () => {
       ],
       winner: 1,
       rounds: [round()],
+      money: {
+        ticker: "BCUSD",
+        bankMode: "mock",
+        results: [
+          { seat: 0, chips: 0, buyIns: 3, spentCents: 3600, cashOutCents: 0, profitCents: -3600 },
+          { seat: 1, chips: 9, buyIns: 1, spentCents: 1200, cashOutCents: 3600, profitCents: 2400 },
+          { seat: 2, chips: 3, buyIns: 1, spentCents: 1200, cashOutCents: 1200, profitCents: 0 },
+        ],
+        transfers: [],
+      },
       onChainActions: 10,
       failedTxs: 0,
     };
@@ -85,5 +97,7 @@ describe("tape verification", () => {
     expect(awards.luckiest.seats).toEqual([1]);
     expect(awards.slowest.seats).toEqual([1]);
     expect(awards.accuser.seats).toEqual([]);
+    expect(awards.customer.seats).toEqual([0]);
+    expect(awards.customer.detail).toContain("$36");
   });
 });
