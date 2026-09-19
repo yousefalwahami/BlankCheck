@@ -175,6 +175,8 @@ export type TapeEnvelope = {
   hash: string; // hex, as sealed on-chain
   sealTx?: string;
   revealTx?: string;
+  /** The referee program accepted the reveal (it reverts on any mismatch). */
+  revealOk?: boolean;
   /** Opened by a RIGGED! verdict during the game. */
   caught: boolean;
 };
@@ -196,6 +198,7 @@ export type TapeRound = {
   firstSeat: number;
   commitTx?: string;
   revealShellsTx?: string;
+  shellsOk?: boolean;
   shots: TapeShot[];
   envelopes: TapeEnvelope[];
   accusations: TapeAccusation[];

@@ -277,7 +277,10 @@ function beginRound(s: GameState, ctx: StepCtx, fx: Effect[], firstSeat: number)
   const live = shells.filter((x) => x === 1).length;
 
   s.secret = { ...emptySecret(), envelopes: s.secret.envelopes, shells, current: shells.slice(), shellSalt: salt, commit };
-  for (const seat of livingSeats(s)) s.secret.cards[seat] = ctx.rng.pick(PLAYABLE_CHEATS) as CheatCode;
+  for (const seat of livingSeats(s)) {
+    const dealt = ctx.rng.pick(PLAYABLE_CHEATS) as CheatCode;
+    s.secret.cards[seat] = ctx.forceCard?.(s.round, seat) ?? dealt;
+  }
 
   s.announced = { live, blank: shells.length - live };
   s.fired = { live: 0, blank: 0 };

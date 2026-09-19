@@ -133,6 +133,8 @@ export type StepCtx = {
   rng: Rng;
   now: number;
   salt: () => Uint8Array;
+  /** Demo mode: rig the deal (e.g. Uncle Gary gets HOT LOAD in round 1). */
+  forceCard?: (round: number, seat: number) => CheatCode | undefined;
 };
 
 export type StepResult = { state: GameState; effects: Effect[]; error?: string };
