@@ -3,6 +3,7 @@
 import { CHEAT_INFO, type CheatCode } from "@blankcheck/shared";
 import { motion } from "motion/react";
 import { useRef, useState } from "react";
+import { sfx, unlockAudio } from "@/lib/sounds";
 
 /**
  * The secret card: face down. Press and hold to peek (so your neighbour can't see), swipe up while
@@ -43,6 +44,7 @@ export function CheatCard(props: { card: CheatCode | null; used: boolean; played
       onContextMenu={(e) => e.preventDefault()}
       onPointerDown={(e) => {
         (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+        unlockAudio();
         startY.current = e.clientY;
         played.current = false;
         setHolding(true);
@@ -54,6 +56,8 @@ export function CheatCard(props: { card: CheatCode | null; used: boolean; played
         if (d < -90 && props.canCheat && !played.current) {
           played.current = true;
           navigator.vibrate?.(30);
+          unlockAudio();
+          sfx.card();
           props.onPlay();
           end();
         }

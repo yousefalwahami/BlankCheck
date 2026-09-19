@@ -115,6 +115,7 @@ export function PhoneController({ room }: { room: string }) {
   // Heartbeat when you're on your last heart and holding the gun.
   useEffect(() => {
     if (!myTurn || (me?.hearts ?? 0) !== 1) return;
+    unlockAudio();
     const t = setInterval(() => sfx.heartbeat(), 1100);
     return () => clearInterval(t);
   }, [myTurn, me?.hearts]);
