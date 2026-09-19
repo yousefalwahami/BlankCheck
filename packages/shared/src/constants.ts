@@ -67,6 +67,7 @@ export const TIMING = {
   roundIntro: 3200,
   shotAnim: 1800,
   riggedTheater: 4200,
+  verdictShow: 3200,
   lastCall: 5000,
   peekVisible: 2000,
   botThinkMin: 1100,
