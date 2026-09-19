@@ -1,0 +1,197 @@
+"use client";
+
+import type { PitBossReading, PublicState } from "@blankcheck/shared";
+import { AnimatePresence, motion } from "motion/react";
+import { Avatar, Hearts, Shell, seatColor } from "../ui/bits";
+
+export type SeatFx = { kind: "hit" | "miss" | "boo"; at: number };
+
+function seatPos(i: number, n: number) {
+  const theta = Math.PI / 2 + (i * 2 * Math.PI) / n; // seat 0 at the bottom, clockwise
+  return { x: 50 + 41 * Math.cos(theta), y: 50 + 37 * Math.sin(theta), theta };
+}
+
+export function ShellBoard({ state }: { state: PublicState }) {
+  const { announced, fired, countIsOff } = state;
+  const liveOver = fired.live > announced.live;
+  const blankOver = fired.blank > announced.blank;
+  const shells = [...Array(announced.live).fill(1), ...Array(announced.blank).fill(0)] as (0 | 1)[];
+  return (
+    <div className="flex items-center gap-[2vw] rounded-2xl border border-bone/10 bg-black/50 px-[2vw] py-[1vh] font-crt text-[2.6vh]">
+      <div className="text-center">
+        <p className="text-[1.8vh] tracking-[0.3em] text-ash">ROUND</p>
+        <p className="font-display text-[4vh] leading-none">{state.round + 1}</p>
+      </div>
+      <div className="h-[6vh] w-px bg-bone/15" />
+      <div>
+        <p className="text-[1.8vh] tracking-[0.3em] text-ash">ANNOUNCED</p>
+        <p>
+          <span className="text-blood">{announced.live} LIVE</span> · <span className="text-steel">{announced.blank} BLANK</span>
+        </p>
+      </div>
+      <div className="flex items-end gap-1">
+        {shells.map((s, i) => (
+          <Shell key={i} live={s === 1} size={34} />
+        ))}
+      </div>
+      <div className="h-[6vh] w-px bg-bone/15" />
+      <div>
+        <p className="text-[1.8vh] tracking-[0.3em] text-ash">FIRED</p>
+        <p>
+          <span className={liveOver ? "animate-pulse font-bold text-brass" : "text-blood"}>
+            LIVE {fired.live}/{announced.live}
+            {liveOver ? " ⚠" : ""}
+          </span>{" "}
+          ·{" "}
+          <span className={blankOver ? "animate-pulse font-bold text-brass" : "text-steel"}>
+            BLANK {fired.blank}/{announced.blank}
+            {blankOver ? " ⚠" : ""}
+          </span>
+        </p>
+      </div>
+      <div className="h-[6vh] w-px bg-bone/15" />
+      <div className="text-center">
+        <p className="text-[1.8vh] tracking-[0.3em] text-ash">IN THE GUN</p>
+        <p className="font-display text-[4vh] leading-none">{state.shellsLeft}</p>
+      </div>
+      <AnimatePresence>
+        {countIsOff && (
+          <motion.div
+            initial={{ scale: 1.6, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            className="rounded-lg border-2 border-brass px-3 py-1 font-display text-[2.6vh] tracking-wider text-brass"
+          >
+            ⚠ THE COUNT IS OFF
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+function Shotgun({ angle, raised }: { angle: number; raised: boolean }) {
+  return (
+    <motion.div
+      className="absolute left-1/2 top-1/2 z-10"
+      style={{ width: 0, height: 0 }}
+      animate={{ rotate: angle, scale: raised ? 1.08 : 1 }}
+      transition={{ type: "spring", stiffness: 70, damping: 14 }}
+    >
+      <svg width="280" height="60" viewBox="0 0 280 60" style={{ transform: "translate(-110px, -30px)" }} aria-hidden>
+        <defs>
+          <linearGradient id="barrel" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stopColor="#6d6d72" />
+            <stop offset="0.5" stopColor="#2b2b2f" />
+            <stop offset="1" stopColor="#141416" />
+          </linearGradient>
+          <linearGradient id="stock" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stopColor="#7a4a26" />
+            <stop offset="1" stopColor="#3b2210" />
+          </linearGradient>
+        </defs>
+        <path d="M4 22 L70 18 L96 22 L96 40 L70 44 L20 52 L4 46 Z" fill="url(#stock)" stroke="#000" strokeWidth="2" />
+        <rect x="92" y="18" width="46" height="22" rx="3" fill="#232326" stroke="#000" strokeWidth="2" />
+        <rect x="136" y="20" width="140" height="9" rx="2" fill="url(#barrel)" stroke="#000" strokeWidth="1.5" />
+        <rect x="136" y="30" width="112" height="9" rx="2" fill="url(#barrel)" stroke="#000" strokeWidth="1.5" />
+        <rect x="160" y="29" width="46" height="13" rx="3" fill="url(#stock)" stroke="#000" strokeWidth="1.5" />
+        <path d="M112 40 q6 12 16 0" fill="none" stroke="#000" strokeWidth="3" />
+      </svg>
+    </motion.div>
+  );
+}
+
+export function Table(props: {
+  state: PublicState;
+  pit: PitBossReading;
+  taunts: Record<number, { text: string; at: number }>;
+  seatFx: Record<number, SeatFx>;
+}) {
+  const { state } = props;
+  const n = state.seats.length;
+  const target = state.aimingAt;
+  const cur = state.currentSeat;
+  const pointAt = target ?? cur;
+  const gunAngle = n ? (seatPos(pointAt, n).theta * 180) / Math.PI : 90;
+  const aiming = target !== null && (state.phase === "AWAIT_TRIGGER" || state.phase === "RESOLVING");
+  const showPit = Object.keys(props.pit).length > 0;
+
+  return (
+    <div className="relative h-full w-full">
+      <div className="felt absolute left-[14%] right-[14%] top-[16%] bottom-[16%] rounded-[50%] border-[10px] border-[#2a1a0e]" />
+      <Shotgun angle={gunAngle} raised={aiming} />
+
+      {state.seats.map((s) => {
+        const p = seatPos(s.seat, n);
+        const isCur = s.seat === cur && !["LAST_CALL", "OVER", "TAPE", "ROUND_START"].includes(state.phase);
+        const isTarget = aiming && s.seat === target;
+        const out = s.hearts <= 0;
+        const busted = state.busted.includes(s.seat);
+        const fx = props.seatFx[s.seat];
+        const recentFx = fx && Date.now() - fx.at < 1500 ? fx : null;
+        const taunt = props.taunts[s.seat];
+        const sus = props.pit[s.seat];
+        return (
+          <motion.div
+            key={s.seat}
+            className="absolute z-20 flex w-[18vw] -translate-x-1/2 -translate-y-1/2 flex-col items-center gap-[0.6vh] text-center"
+            style={{ left: `${p.x}%`, top: `${p.y}%` }}
+            animate={recentFx?.kind === "hit" || recentFx?.kind === "boo" ? { x: [0, -14, 14, -10, 10, 0] } : { x: 0 }}
+            transition={{ duration: 0.5 }}
+          >
+            <AnimatePresence>
+              {taunt && Date.now() - taunt.at < 3500 && (
+                <motion.div
+                  key={taunt.at}
+                  initial={{ opacity: 0, y: 10, scale: 0.9 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="absolute -top-[7vh] z-30 max-w-[20vw] rounded-xl bg-bone px-3 py-1.5 font-type text-[1.9vh] leading-tight text-ink shadow-lg"
+                >
+                  “{taunt.text}”
+                </motion.div>
+              )}
+            </AnimatePresence>
+            <div className="relative">
+              {isCur && (
+                <motion.div
+                  layoutId="spotlight"
+                  className="absolute -inset-[1.6vh] rounded-full"
+                  style={{ background: `radial-gradient(circle, ${seatColor(s.seat)}55, transparent 70%)` }}
+                  transition={{ type: "spring", stiffness: 120, damping: 18 }}
+                />
+              )}
+              {isTarget && <div className="absolute -inset-[1vh] animate-ping rounded-full border-4 border-blood" />}
+              <div className="relative">
+                <Avatar seat={s} size={88} />
+              </div>
+              {recentFx?.kind === "hit" && (
+                <motion.div initial={{ scale: 0.5, opacity: 1 }} animate={{ scale: 2.2, opacity: 0 }} transition={{ duration: 0.9 }} className="absolute inset-0 text-center text-[6vh]">
+                  💥
+                </motion.div>
+              )}
+            </div>
+            <p className={`font-display text-[3vh] leading-none tracking-wide ${out ? "text-ash line-through" : ""}`}>{s.name}</p>
+            {!out && <Hearts n={s.hearts} max={state.config.hearts} size="text-[2.6vh]" />}
+            <div className="flex h-[3vh] items-center gap-2 font-crt text-[1.8vh]">
+              {busted && <span className="stamp -rotate-6 border-[3px] px-1 text-[2vh] text-blood">BUSTED</span>}
+              {!s.connected && s.kind === "human" && <span className="text-ash">📵</span>}
+              {s.walletReady && s.kind === "human" && <span title="Face ID wallet">🔐</span>}
+              {state.accuseUsed.includes(s.seat) && !busted && <span className="text-ash">called it</span>}
+            </div>
+            {showPit && !out && (
+              <div className="w-[9vw]" title="Pit Boss suspicion">
+                <div className="h-[0.9vh] overflow-hidden rounded-full bg-bone/10">
+                  <motion.div
+                    className="h-full rounded-full"
+                    animate={{ width: `${Math.round((sus ?? 0.1) * 100)}%`, backgroundColor: (sus ?? 0) > 0.6 ? "#e0312b" : (sus ?? 0) > 0.35 ? "#e8b13a" : "#7dffa8" }}
+                    transition={{ type: "spring", stiffness: 60, damping: 16 }}
+                  />
+                </div>
+              </div>
+            )}
+          </motion.div>
+        );
+      })}
+    </div>
+  );
+}

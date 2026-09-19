@@ -433,6 +433,18 @@ export class Room {
     this.chainLog.push(tx);
     if (this.chainLog.length > 60) this.chainLog.shift();
     this.io.to(this.all).emit(S2C.chainTx, tx);
+    this.scheduleBroadcast();
+  }
+
+  private broadcastPending = false;
+  /** Coalesce state pushes caused by chain receipts (the action counter). */
+  private scheduleBroadcast() {
+    if (this.broadcastPending) return;
+    this.broadcastPending = true;
+    setTimeout(() => {
+      this.broadcastPending = false;
+      if (!this.disposed) this.broadcast();
+    }, 50);
   }
 
   private async finishTape(gen: number) {
