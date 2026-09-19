@@ -27,7 +27,7 @@ export default function Home() {
         </Link>
       </div>
       <p className="max-w-lg font-crt text-lg leading-snug text-ash">
-        Face ID pops it. Every live, sealed envelope and accusation is a transaction on Thru, refereed by a program written in C.
+        Buy in for $12, play for chips, cash out the rest. Face ID pops it and pays the buy-in; every live, sealed envelope, accusation and payout is a transaction on Thru, refereed by a program written in C.
       </p>
     </main>
   );

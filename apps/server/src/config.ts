@@ -10,6 +10,11 @@ export const config = {
     .map((s) => s.trim())
     .filter(Boolean),
   refereeMode: (env.REFEREE_MODE === "thru" ? "thru" : "mock") as "mock" | "thru",
+  /** Where the play money lives: mock (in memory) or thru (a Token Program mint). Defaults to REFEREE_MODE. */
+  bankMode: ((env.BANK_MODE ?? env.REFEREE_MODE) === "thru" ? "thru" : "mock") as "mock" | "thru",
+  /** Optional overrides; by default the Token Program comes from @thru/programs and the mint is derived from the house key. */
+  tokenProgramAddress: env.TOKEN_PROGRAM_ADDRESS ?? "",
+  bankMintAddress: env.BANK_MINT_ADDRESS ?? "",
   waitForChain: bool(env.WAIT_FOR_CHAIN, true),
   /** Even when waiting for the chain, never hold the table longer than this for one confirmation. */
   chainWaitCapMs: Number(env.CHAIN_WAIT_CAP_MS ?? 4000),
@@ -23,8 +28,6 @@ export const config = {
   txStateUnits: env.THRU_STATE_UNITS ? Number(env.THRU_STATE_UNITS) : undefined,
   txMemoryUnits: env.THRU_MEMORY_UNITS ? Number(env.THRU_MEMORY_UNITS) : undefined,
   typesafeApiKey: env.TYPESAFE_API_KEY ?? "",
-  /** Vercel AI Gateway key. Preferred for Jev; TYPESAFE_API_KEY is the direct TypeSafe fallback. */
-  aiGatewayApiKey: env.AI_GATEWAY_API_KEY ?? "",
   jevModel: env.JEV_MODEL ?? "",
   demoSeed: env.DEMO_SEED ?? "",
   /** Multiplies every game timer (tests use 0.02 to play a whole game in seconds). */

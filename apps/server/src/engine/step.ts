@@ -1,27 +1,33 @@
 import {
   Cheat,
   CHEAT_INFO,
-  MAX_ROUNDS,
   MAX_SEATS,
   MAX_WINDOWS,
   MIN_SEATS,
+  MONEY,
   NO_SHELL,
   PLAYABLE_CHEATS,
   TIMING,
+  dollars,
   envelopeHash,
   fromHex,
   shellsHash,
   toHex,
+  type CashOutResult,
   type CheatCode,
   type Phase,
 } from "@blankcheck/shared";
 import {
+  BUY_IN_PHASES,
+  canAfford,
   emptySecret,
   envelopeKey,
+  fundedSeats,
   generateShells,
-  isAlive,
-  livingSeats,
-  nextLiving,
+  inPlay,
+  nextFunded,
+  potLeaders,
+  profitChips,
   publicPLive,
   pushLog,
   seatName,
@@ -59,9 +65,39 @@ function reduce(s: GameState, a: Action, ctx: StepCtx, fx: Effect[]): void {
       rule(s.phase === "LOBBY", "The game already started");
       rule(s.seats.length >= MIN_SEATS, `Need at least ${MIN_SEATS} players`);
       rule(s.seats.length <= MAX_SEATS, `At most ${MAX_SEATS} players`);
-      for (const seat of s.seats) seat.hearts = s.config.hearts;
+      const waiting = s.seats.filter((x) => x.chips === 0);
+      rule(waiting.length === 0, `Waiting for ${waiting.map((x) => x.name).join(", ")} to buy in`);
       pushLog(s, ctx.now, "info", "The dealer takes a seat. Everyone cheats. The chain remembers.");
-      beginRound(s, ctx, fx, ctx.rng.int(0, s.seats.length - 1));
+      const funded = fundedSeats(s);
+      beginRound(s, ctx, fx, funded[ctx.rng.int(0, funded.length - 1)]);
+      return;
+    }
+
+    case "BUY_IN": {
+      rule(BUY_IN_PHASES.includes(s.phase), "Hold on: finish this shot first");
+      const seat = s.seats[a.seat];
+      rule(seat, "No such seat");
+      rule(seat.chips === 0, "You still have chips");
+      rule(canAfford(seat), `You need ${dollars(MONEY.buyInCents)} in your wallet`);
+      rule(!(s.phase === "ROUND_END" && s.round + 1 >= s.config.rounds), "The game is over");
+      seat.chips = MONEY.buyInChips;
+      seat.buyIns += 1;
+      seat.bankrollCents! -= MONEY.buyInCents;
+      pushLog(s, ctx.now, "money", `💰 ${seat.name} buys in: ${dollars(MONEY.buyInCents)} → ${MONEY.buyInChips} chips`, seat.seat);
+      fx.push({ type: "fx", fx: { type: "buyIn", seat: seat.seat, chips: MONEY.buyInChips, cents: MONEY.buyInCents } });
+      if (s.phase === "LOBBY") return; // the table is created with everyone's first buy-in
+
+      fx.push({
+        type: "chain",
+        tag: `buyin:${s.round}:${seat.seat}:${seat.buyIns}`,
+        call: { kind: "buyIn", round: s.round, seat: seat.seat, paymentTx: a.paymentTx },
+      });
+      s.tape[s.tape.length - 1]?.buyIns.push({ seat: seat.seat });
+      // Everyone who could buy back in has: don't make the table wait for the timer.
+      if (s.phase === "BUY_INS" && s.seats.every((x) => x.chips > 0 || !canAfford(x)) && fundedSeats(s).length >= 2) {
+        fx.push({ type: "cancelTimer", key: "phase" });
+        startNextRound(s, ctx, fx);
+      }
       return;
     }
 
@@ -75,7 +111,7 @@ function reduce(s: GameState, a: Action, ctx: StepCtx, fx: Effect[]): void {
     case "AIM": {
       rule(PLAY_PHASES.includes(s.phase), "Not your moment");
       rule(a.seat === s.currentSeat, "It's not your turn");
-      rule(isAlive(s, a.target), "That player is out");
+      rule(inPlay(s, a.target), "They're broke: nothing to shoot for");
       s.aimingAt = a.target;
       s.phase = "AWAIT_TRIGGER";
       return;
@@ -84,7 +120,7 @@ function reduce(s: GameState, a: Action, ctx: StepCtx, fx: Effect[]): void {
     case "PULL": {
       rule(s.phase === "AWAIT_TRIGGER", "Pick a target first");
       rule(a.seat === s.currentSeat, "It's not your turn");
-      rule(s.aimingAt !== null && isAlive(s, s.aimingAt), "Pick a living target");
+      rule(s.aimingAt !== null && inPlay(s, s.aimingAt), "Pick a target with chips");
       const target = s.aimingAt;
       s.phase = "RESOLVING";
       s.pendingShot = {
@@ -112,9 +148,9 @@ function reduce(s: GameState, a: Action, ctx: StepCtx, fx: Effect[]): void {
       rule(s.phase === "RESOLVING" && s.lastShot, "Nothing to advance");
       const { shooter, again } = s.lastShot;
       s.lastShot = null;
-      if (livingSeats(s).length <= 1) return gameOver(s, ctx, fx);
+      if (fundedSeats(s).length < 2) return endRound(s, ctx, fx);
       if (s.shot >= s.secret.shells.length) return enterLastCall(s, ctx, fx);
-      s.currentSeat = again ? shooter : nextLiving(s, shooter);
+      s.currentSeat = again && inPlay(s, shooter) ? shooter : nextFunded(s, shooter);
       s.aimingAt = null;
       s.phase = "AWAIT_AIM";
       s.turnStartedAt = ctx.now;
@@ -123,7 +159,7 @@ function reduce(s: GameState, a: Action, ctx: StepCtx, fx: Effect[]): void {
 
     case "CHEAT": {
       rule(PLAY_PHASES.includes(s.phase), "You can't play a card right now");
-      rule(isAlive(s, a.seat), "Ghosts can't cheat");
+      rule(inPlay(s, a.seat), "You're broke: buy back in first");
       const card = s.secret.cards[a.seat];
       rule(card !== undefined, "You have no card this round");
       rule(!s.secret.used[a.seat], "You already played your card");
@@ -150,8 +186,8 @@ function reduce(s: GameState, a: Action, ctx: StepCtx, fx: Effect[]): void {
 
     case "ACCUSE": {
       rule(ACCUSE_PHASES.includes(s.phase), "Hold on. Wait for the shot to land.");
-      rule(isAlive(s, a.accuser), "Ghosts can't accuse");
-      rule(isAlive(s, a.accused), "That player is already out");
+      rule(inPlay(s, a.accuser), "You need chips on the table to call RIGGED!");
+      rule(inPlay(s, a.accused), "They're broke: nothing to take");
       rule(a.accuser !== a.accused, "You can't accuse yourself");
       rule(!s.accuseUsed.includes(a.accuser), "You already called RIGGED! this round");
       rule(!s.busted.includes(a.accused), "They're already BUSTED this round");
@@ -177,7 +213,7 @@ function reduce(s: GameState, a: Action, ctx: StepCtx, fx: Effect[]): void {
         fx.push({ type: "cancelTimer", key: "phase" });
         s.lastCallEndsAt = null;
       }
-      s.rigged = { accuser: a.accuser, accused: a.accused, verdict: null, evidence: null, resumePhase: s.phase };
+      s.rigged = { accuser: a.accuser, accused: a.accused, verdict: null, evidence: null, chipsMoved: null, resumePhase: s.phase };
       s.phase = "RIGGED";
       pushLog(s, ctx.now, "rigged", `🚨 ${seatName(s, a.accuser)} yells RIGGED! at ${seatName(s, a.accused)}`, a.accuser);
       fx.push({ type: "fx", fx: { type: "rigged", accuser: a.accuser, accused: a.accused } });
@@ -191,24 +227,29 @@ function reduce(s: GameState, a: Action, ctx: StepCtx, fx: Effect[]): void {
       for (const e of opened) e.caught = true;
       const evidence = opened.filter((e) => e.cheat !== Cheat.NONE).map((e) => ({ window: e.window, cheat: e.cheat, shell: e.shell }));
       const verdict = evidence.length > 0 ? "GUILTY" : "INNOCENT";
-      const loser = verdict === "GUILTY" ? accused : accuser;
-      s.seats[loser].hearts = Math.max(0, s.seats[loser].hearts - 1);
+      // Must match REVEAL (mode 0) in blank_check.c: guilty hands over every chip, a wrong call costs one.
+      const from = verdict === "GUILTY" ? accused : accuser;
+      const to = verdict === "GUILTY" ? accuser : accused;
+      const moved = verdict === "GUILTY" ? s.seats[accused].chips : Math.min(1, s.seats[accuser].chips);
+      s.seats[from].chips -= moved;
+      s.seats[to].chips += moved;
       if (verdict === "GUILTY") s.busted.push(accused);
       s.rigged.verdict = verdict;
       s.rigged.evidence = evidence;
-      s.tape[s.tape.length - 1].accusations.push({ accuser, accused, verdict, window: s.window - 1 });
-      const eliminated = s.seats[loser].hearts === 0;
+      s.rigged.chipsMoved = moved;
+      s.tape[s.tape.length - 1].accusations.push({ accuser, accused, verdict, window: s.window - 1, chipsMoved: moved });
+      const broke = s.seats[from].chips === 0;
       pushLog(
         s,
         ctx.now,
         "verdict",
         verdict === "GUILTY"
-          ? `⚖️ GUILTY: ${seatName(s, accused)} played ${evidence.map((e) => CHEAT_INFO[e.cheat].name).join(", ")}`
-          : `⚖️ INNOCENT: ${seatName(s, accuser)} pays for the false call`,
-        loser,
+          ? `⚖️ GUILTY: ${seatName(s, accused)} played ${evidence.map((e) => CHEAT_INFO[e.cheat].name).join(", ")} and hands over ${moved} chip${moved === 1 ? "" : "s"}`
+          : `⚖️ INNOCENT: ${seatName(s, accuser)} pays ${seatName(s, accused)} a chip for the false call`,
+        from,
       );
-      if (eliminated) pushLog(s, ctx.now, "elim", `👻 ${seatName(s, loser)} is out`, loser);
-      fx.push({ type: "fx", fx: { type: "verdict", accuser, accused, verdict, evidence, loser, eliminated } });
+      fx.push({ type: "fx", fx: { type: "verdict", accuser, accused, verdict, evidence, from, to, chips: moved, broke } });
+      if (broke) wentBroke(s, ctx, fx, from);
       fx.push({ type: "timer", key: "phase", ms: TIMING.verdictShow, action: { type: "RESUME" } });
       return;
     }
@@ -217,15 +258,15 @@ function reduce(s: GameState, a: Action, ctx: StepCtx, fx: Effect[]): void {
       rule(s.phase === "RIGGED" && s.rigged?.verdict, "Nothing to resume");
       const resume = s.rigged.resumePhase;
       s.rigged = null;
-      if (livingSeats(s).length <= 1) return gameOver(s, ctx, fx);
+      if (fundedSeats(s).length < 2) return endRound(s, ctx, fx);
       if (resume === "LAST_CALL") return enterLastCall(s, ctx, fx);
-      // Must match the referee: a shooter eliminated by a verdict passes the gun on.
-      if (!isAlive(s, s.currentSeat)) {
-        s.currentSeat = nextLiving(s, s.currentSeat);
+      // Must match the referee: a shooter who went broke in a verdict passes the gun on.
+      if (!inPlay(s, s.currentSeat)) {
+        s.currentSeat = nextFunded(s, s.currentSeat);
         s.aimingAt = null;
         s.phase = "AWAIT_AIM";
         s.turnStartedAt = ctx.now;
-      } else if (s.aimingAt !== null && !isAlive(s, s.aimingAt)) {
+      } else if (s.aimingAt !== null && !inPlay(s, s.aimingAt)) {
         s.aimingAt = null;
         s.phase = "AWAIT_AIM";
       } else {
@@ -237,8 +278,29 @@ function reduce(s: GameState, a: Action, ctx: StepCtx, fx: Effect[]): void {
     case "LAST_CALL_END": {
       rule(s.phase === "LAST_CALL", "Not in Last Call");
       s.lastCallEndsAt = null;
-      beginRound(s, ctx, fx, nextLiving(s, s.lastShooter));
+      endRound(s, ctx, fx);
       return;
+    }
+
+    case "NEXT_ROUND": {
+      rule(s.phase === "ROUND_END", "The round isn't over");
+      if (s.round + 1 >= s.config.rounds) return gameOver(s, ctx, fx, false);
+      if (fundedSeats(s).length >= 2) return startNextRound(s, ctx, fx);
+      const couldPlay = s.seats.filter((x) => x.chips > 0 || canAfford(x)).length;
+      if (couldPlay < 2) return gameOver(s, ctx, fx, true);
+      s.phase = "BUY_INS";
+      s.buyInsEndAt = ctx.now + TIMING.buyInWindow;
+      pushLog(s, ctx.now, "money", "💸 Not enough chips on the table. Buy back in to keep playing!");
+      fx.push({ type: "fx", fx: { type: "buyInWindow", endsAt: s.buyInsEndAt } });
+      fx.push({ type: "timer", key: "phase", ms: TIMING.buyInWindow, action: { type: "BUY_INS_END" } });
+      return;
+    }
+
+    case "BUY_INS_END": {
+      rule(s.phase === "BUY_INS", "Not waiting for buy-ins");
+      s.buyInsEndAt = null;
+      if (fundedSeats(s).length >= 2) return startNextRound(s, ctx, fx);
+      return gameOver(s, ctx, fx, true);
     }
 
     case "TAPE": {
@@ -268,8 +330,12 @@ function reduce(s: GameState, a: Action, ctx: StepCtx, fx: Effect[]): void {
   }
 }
 
+function startNextRound(s: GameState, ctx: StepCtx, fx: Effect[]): void {
+  s.buyInsEndAt = null;
+  beginRound(s, ctx, fx, nextFunded(s, s.lastShooter));
+}
+
 function beginRound(s: GameState, ctx: StepCtx, fx: Effect[], firstSeat: number): void {
-  if (s.round + 1 >= MAX_ROUNDS) return gameOverByCap(s, ctx, fx);
   s.round += 1;
   const shells = generateShells(ctx.rng);
   const salt = ctx.salt();
@@ -277,7 +343,7 @@ function beginRound(s: GameState, ctx: StepCtx, fx: Effect[], firstSeat: number)
   const live = shells.filter((x) => x === 1).length;
 
   s.secret = { ...emptySecret(), envelopes: s.secret.envelopes, shells, current: shells.slice(), shellSalt: salt, commit };
-  for (const seat of livingSeats(s)) {
+  for (const seat of fundedSeats(s)) {
     const dealt = ctx.rng.pick(PLAYABLE_CHEATS) as CheatCode;
     s.secret.cards[seat] = ctx.forceCard?.(s.round, seat) ?? dealt;
   }
@@ -292,7 +358,7 @@ function beginRound(s: GameState, ctx: StepCtx, fx: Effect[], firstSeat: number)
   s.aimingAt = null;
   s.pendingShot = null;
   s.lastShot = null;
-  s.currentSeat = isAlive(s, firstSeat) ? firstSeat : nextLiving(s, firstSeat);
+  s.currentSeat = inPlay(s, firstSeat) ? firstSeat : nextFunded(s, firstSeat);
   s.phase = "ROUND_START";
   s.turnStartedAt = null;
 
@@ -306,15 +372,17 @@ function beginRound(s: GameState, ctx: StepCtx, fx: Effect[], firstSeat: number)
     shots: [],
     envelopes: [],
     accusations: [],
+    buyIns: [],
+    pot: null,
   });
 
-  pushLog(s, ctx.now, "round", `Round ${s.round + 1}: ${live} LIVE · ${shells.length - live} BLANK`);
+  pushLog(s, ctx.now, "round", `Round ${s.round + 1} of ${s.config.rounds}: ${live} LIVE · ${shells.length - live} BLANK`);
   fx.push({
     type: "chain",
     tag: `commit:${s.round}`,
     call: { kind: "commitRound", round: s.round, shellCount: shells.length, liveCount: live, firstSeat: s.currentSeat, commit },
   });
-  fx.push({ type: "fx", fx: { type: "round", round: s.round, live, blank: shells.length - live } });
+  fx.push({ type: "fx", fx: { type: "round", round: s.round, rounds: s.config.rounds, live, blank: shells.length - live } });
   fx.push({ type: "timer", key: "phase", ms: TIMING.roundIntro, action: { type: "BEGIN_TURNS" } });
 }
 
@@ -324,13 +392,17 @@ function fire(s: GameState, ctx: StepCtx, fx: Effect[]): void {
   const live = s.secret.current[i] === 1;
   const committed = s.secret.shells[i];
 
+  // Must match RESOLVE_SHOT in blank_check.c: a live hit knocks one chip into the pot.
   if (live) {
     s.fired.live += 1;
-    s.seats[target].hearts = Math.max(0, s.seats[target].hearts - 1);
+    if (s.seats[target].chips > 0) {
+      s.seats[target].chips -= 1;
+      s.pot += 1;
+    }
   } else {
     s.fired.blank += 1;
   }
-  const eliminated = live && s.seats[target].hearts === 0;
+  const broke = live && s.seats[target].chips === 0;
   const again = !live && target === shooter;
 
   const sealed = sealWindow(s, ctx);
@@ -361,20 +433,33 @@ function fire(s: GameState, ctx: StepCtx, fx: Effect[]): void {
 
   const who = seatName(s, shooter);
   const whom = target === shooter ? "themselves" : seatName(s, target);
-  pushLog(s, ctx.now, "shot", live ? `🎉 POP! ${who} popped ${whom}.` : `💨 pfft. ${who} popped ${whom}.${again ? " Goes again." : ""}`, shooter);
-  if (eliminated) pushLog(s, ctx.now, "elim", `👻 ${seatName(s, target)} is out`, target);
+  pushLog(s, ctx.now, "shot", live ? `🎉 POP! ${who} popped ${whom}: a chip into the pot.` : `💨 pfft. ${who} popped ${whom}.${again ? " Goes again." : ""}`, shooter);
 
   const wasOff = s.countIsOff;
   const liveOver = s.fired.live > s.announced.live;
   const blankOver = s.fired.blank > s.announced.blank;
   if (liveOver || blankOver) s.countIsOff = true;
 
-  fx.push({ type: "fx", fx: { type: "shot", shooter, target, live, heartsLeft: s.seats[target].hearts, eliminated, again } });
+  fx.push({ type: "fx", fx: { type: "shot", shooter, target, live, chipsLeft: s.seats[target].chips, broke, pot: s.pot, again } });
+  if (broke) wentBroke(s, ctx, fx, target);
   if (!wasOff && s.countIsOff) {
     pushLog(s, ctx.now, "mismatch", `⚠ THE COUNT IS OFF: ${liveOver ? "too many LIVE" : "too many BLANK"}`);
     fx.push({ type: "fx", fx: { type: "mismatch", which: liveOver ? "live" : "blank" } });
   }
   fx.push({ type: "timer", key: "phase", ms: TIMING.shotAnim, action: { type: "ADVANCE" } });
+}
+
+function wentBroke(s: GameState, ctx: StepCtx, fx: Effect[], seat: number): void {
+  const x = s.seats[seat];
+  x.cleanedOut = !canAfford(x);
+  pushLog(
+    s,
+    ctx.now,
+    "elim",
+    x.cleanedOut ? `💀 ${x.name} is cleaned out` : `💸 ${x.name} is broke. Buy back in for ${dollars(MONEY.buyInCents)}!`,
+    seat,
+  );
+  fx.push({ type: "fx", fx: { type: "broke", seat, cleanedOut: x.cleanedOut } });
 }
 
 function enterLastCall(s: GameState, ctx: StepCtx, fx: Effect[]): void {
@@ -389,28 +474,54 @@ function enterLastCall(s: GameState, ctx: StepCtx, fx: Effect[]): void {
   fx.push({ type: "timer", key: "phase", ms: TIMING.lastCall, action: { type: "LAST_CALL_END" } });
 }
 
-function gameOver(s: GameState, ctx: StepCtx, fx: Effect[], winner?: number): void {
-  const w = winner ?? livingSeats(s)[0] ?? s.currentSeat;
+/** The pot goes to the chip leader (ties split; the remainder carries over). Must match END_ROUND in blank_check.c. */
+function endRound(s: GameState, ctx: StepCtx, fx: Effect[]): void {
+  s.phase = "ROUND_END";
+  s.aimingAt = null;
+  s.lastCallEndsAt = null;
+  const winners = potLeaders(s);
+  const chipsEach = winners.length ? Math.floor(s.pot / winners.length) : 0;
+  for (const w of winners) s.seats[w].chips += chipsEach;
+  s.pot -= chipsEach * winners.length;
+  s.tape[s.tape.length - 1].pot = { winners, chipsEach, carried: s.pot };
+  fx.push({ type: "chain", tag: `endround:${s.round}`, call: { kind: "endRound", round: s.round } });
+  if (chipsEach > 0) {
+    pushLog(s, ctx.now, "money", `🏦 The pot (${chipsEach * winners.length}) goes to ${winners.map((w) => seatName(s, w)).join(" & ")}`);
+  }
+  fx.push({ type: "fx", fx: { type: "potAward", round: s.round, winners: chipsEach > 0 ? winners : [], chipsEach, carried: s.pot } });
+  fx.push({ type: "timer", key: "phase", ms: TIMING.potAward, action: { type: "NEXT_ROUND" } });
+}
+
+/** Everyone cashes out at $4 a chip; the biggest profit wins (lowest seat on a tie, like the referee). */
+function gameOver(s: GameState, ctx: StepCtx, fx: Effect[], early: boolean): void {
+  if (early) {
+    // Out of players before the last round: COMMIT_ROUND with 0 shells finishes the game on-chain.
+    fx.push({
+      type: "chain",
+      tag: `finish:${s.round + 1}`,
+      call: { kind: "commitRound", round: s.round + 1, shellCount: 0, liveCount: 0, firstSeat: 0, commit: new Uint8Array(32) },
+    });
+    pushLog(s, ctx.now, "info", "Not enough players left with money. Cashing out.");
+  }
+  const results: CashOutResult[] = s.seats.map((x) => {
+    const cashOutCents = x.chips * MONEY.chipCents;
+    const spentCents = x.buyIns * MONEY.buyInCents;
+    return { seat: x.seat, chips: x.chips, buyIns: x.buyIns, spentCents, cashOutCents, profitCents: cashOutCents - spentCents };
+  });
+  let w = 0;
+  for (const x of s.seats) if (profitChips(x) > profitChips(s.seats[w])) w = x.seat;
+  for (const x of s.seats) x.bankrollCents = (x.bankrollCents ?? 0) + x.chips * MONEY.chipCents;
   s.winner = w;
+  s.results = results;
   s.phase = "OVER";
   s.aimingAt = null;
   s.lastCallEndsAt = null;
-  pushLog(s, ctx.now, "win", `🏆 ${seatName(s, w)} is the last one standing`, w);
-  fx.push({ type: "fx", fx: { type: "gameOver", winner: w } });
+  s.buyInsEndAt = null;
+  const top = results[w];
+  pushLog(s, ctx.now, "win", `🏆 ${seatName(s, w)} cashes out ${dollars(top.cashOutCents)} (${top.profitCents >= 0 ? "+" : ""}${dollars(top.profitCents)})`, w);
+  fx.push({ type: "fx", fx: { type: "gameOver", winner: w, results } });
+  fx.push({ type: "cashOut", results });
   fx.push({ type: "timer", key: "phase", ms: TIMING.gameOverToTape, action: { type: "TAPE" } });
-}
-
-/** Out of on-chain round slots: most hearts wins (lowest seat on a tie). Must match COMMIT_ROUND with 0 shells. */
-function gameOverByCap(s: GameState, ctx: StepCtx, fx: Effect[]): void {
-  let best = 0;
-  for (const seat of s.seats) if (seat.hearts > s.seats[best].hearts) best = seat.seat;
-  fx.push({
-    type: "chain",
-    tag: `finish:${s.round + 1}`,
-    call: { kind: "commitRound", round: s.round + 1, shellCount: 0, liveCount: 0, firstSeat: 0, commit: new Uint8Array(32) },
-  });
-  pushLog(s, ctx.now, "info", "The dealer is out of shells. Most hearts wins.");
-  gameOver(s, ctx, fx, best);
 }
 
 /** Seal one envelope per seat (a decoy NONE unless that seat has an unsealed cheat). */
@@ -445,3 +556,4 @@ function roundEnvelopes(s: GameState, round: number, seat: number) {
 function roundEntries(s: GameState, round: number, seat: number) {
   return roundEnvelopes(s, round, seat).map((e) => ({ cheat: e.cheat, shell: e.shell, salt: e.salt }));
 }
+
