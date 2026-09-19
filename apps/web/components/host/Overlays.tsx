@@ -1,9 +1,9 @@
 "use client";
 
-import { CHEAT_INFO, TIMING, type ChainTx, type Fx, type PublicState } from "@blankcheck/shared";
+import { CHEAT_INFO, MONEY, TIMING, dollars, type ChainTx, type Fx, type PublicState } from "@blankcheck/shared";
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useState } from "react";
-import { Avatar, Shell } from "../ui/bits";
+import { Avatar, ChipIcon, Profit, Shell } from "../ui/bits";
 
 type Timed<T> = (T & { at: number }) | null;
 export type OverlayFx = {
@@ -11,8 +11,13 @@ export type OverlayFx = {
   shot: Timed<Extract<Fx, { type: "shot" }>>;
   mismatch: Timed<Extract<Fx, { type: "mismatch" }>>;
   verdict: Timed<Extract<Fx, { type: "verdict" }>>;
+  potAward: Timed<Extract<Fx, { type: "potAward" }>>;
   gameOver: Timed<Extract<Fx, { type: "gameOver" }>>;
+  /** Small news along the top: buy-ins and players going broke. The name is filled in at render. */
+  banner: Timed<{ seat: number; label: string; tone: "money" | "bad" }>;
 };
+
+export const emptyOverlayFx: OverlayFx = { round: null, shot: null, mismatch: null, verdict: null, potAward: null, gameOver: null, banner: null };
 
 function useNow(interval = 200) {
   const [now, setNow] = useState(() => Date.now());
@@ -32,34 +37,40 @@ export function Overlays({ state, fx, txs }: { state: PublicState; fx: OverlayFx
   const showShot = fx.shot && now - fx.shot.at < TIMING.shotAnim - 150;
   const showMismatch = fx.mismatch && now - fx.mismatch.at < 2200 && !showShot;
   const rigged = state.phase === "RIGGED" ? state.rigged : null;
+  const showPot = state.phase === "ROUND_END" && fx.potAward && now - fx.potAward.at < TIMING.potAward + 500;
   const showGameOver = state.phase === "OVER" && fx.gameOver;
+  const showBanner = fx.banner && now - fx.banner.at < 3200 && !showRound && !showGameOver;
   const lastCall = state.phase === "LAST_CALL" && state.lastCallEndsAt ? Math.max(0, Math.ceil((state.lastCallEndsAt - now) / 1000)) : null;
+  const buyIns = state.phase === "BUY_INS" && state.buyInsEndAt ? Math.max(0, Math.ceil((state.buyInsEndAt - now) / 1000)) : null;
 
   return (
     <>
-      <AnimatePresence>
-        {showRound && fx.round && (
-          <motion.div key={`round-${fx.round.at}`} className={`${full} bg-black/80`} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-            <motion.p initial={{ y: -30, opacity: 0 }} animate={{ y: 0, opacity: 1 }} className="font-crt text-[3vh] tracking-[0.5em] text-ash">
-              THE DEALER LOADS THE GUN
-            </motion.p>
-            <motion.h2 initial={{ scale: 2.4, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ type: "spring", stiffness: 160, damping: 14 }} className="font-display text-[18vh] leading-none">
-              ROUND {fx.round.round + 1}
-            </motion.h2>
-            <div className="mt-[3vh] flex items-end gap-[1vw]">
-              {[...Array(fx.round.live).fill(1), ...Array(fx.round.blank).fill(0)].map((s, i) => (
-                <motion.div key={i} initial={{ y: 60, opacity: 0, rotate: -20 }} animate={{ y: 0, opacity: 1, rotate: 0 }} transition={{ delay: 0.4 + i * 0.12 }}>
-                  <Shell live={s === 1} size={96} />
-                </motion.div>
-              ))}
-            </div>
-            <p className="mt-[3vh] font-display text-[7vh] tracking-wide">
-              <span className="text-blood">{fx.round.live} LIVE</span> · <span className="text-steel">{fx.round.blank} BLANK</span>
-            </p>
-            <p className="mt-[1vh] font-type text-[2.6vh] text-bone/70">Order sealed on-chain. Cheat cards dealt. Good luck.</p>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {/*
+       * The overlays that black out the table mount and unmount outright. A background tab pauses
+       * animation frames, an exit animation never finishes, and the table stays hidden for good.
+       */}
+      {showRound && fx.round && (
+        <motion.div key={`round-${fx.round.at}`} className={`${full} bg-black/80`} initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+          <motion.p initial={{ y: -30, opacity: 0 }} animate={{ y: 0, opacity: 1 }} className="font-crt text-[3vh] tracking-[0.5em] text-ash">
+            THE DEALER LOADS THE GUN
+          </motion.p>
+          <motion.h2 initial={{ scale: 2.4, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ type: "spring", stiffness: 160, damping: 14 }} className="font-display text-[18vh] leading-none">
+            ROUND {fx.round.round + 1}
+          </motion.h2>
+          <p className="font-crt text-[3vh] tracking-[0.5em] text-ash">OF {fx.round.rounds}</p>
+          <div className="mt-[3vh] flex items-end gap-[1vw]">
+            {[...Array(fx.round.live).fill(1), ...Array(fx.round.blank).fill(0)].map((s, i) => (
+              <motion.div key={i} initial={{ y: 60, opacity: 0, rotate: -20 }} animate={{ y: 0, opacity: 1, rotate: 0 }} transition={{ delay: 0.4 + i * 0.12 }}>
+                <Shell live={s === 1} size={96} />
+              </motion.div>
+            ))}
+          </div>
+          <p className="mt-[3vh] font-display text-[7vh] tracking-wide">
+            <span className="text-blood">{fx.round.live} LIVE</span> · <span className="text-steel">{fx.round.blank} BLANK</span>
+          </p>
+          <p className="mt-[1vh] font-type text-[2.6vh] text-bone/70">Order sealed on-chain. Cheat cards dealt. Every live shell costs a chip.</p>
+        </motion.div>
+      )}
 
       <AnimatePresence>
         {showShot && fx.shot && (
@@ -75,9 +86,9 @@ export function Overlays({ state, fx, txs }: { state: PublicState; fx: OverlayFx
             </motion.h2>
             <p className="rounded-xl bg-black/70 px-6 py-2 font-display text-[4.5vh] tracking-wide">
               {name(fx.shot.shooter)} → {fx.shot.target === fx.shot.shooter ? "themselves" : name(fx.shot.target)}
-              {fx.shot.live && <span className="text-blood"> · −1 ❤️</span>}
+              {fx.shot.live && <span className="text-brass"> · 1 chip into the pot</span>}
               {fx.shot.again && <span className="text-brass"> · GOES AGAIN</span>}
-              {fx.shot.eliminated && <span className="text-ash"> · 👻 OUT</span>}
+              {fx.shot.broke && <span className="text-blood"> · 💸 BROKE</span>}
             </p>
           </motion.div>
         )}
@@ -92,7 +103,25 @@ export function Overlays({ state, fx, txs }: { state: PublicState; fx: OverlayFx
         )}
       </AnimatePresence>
 
-      <AnimatePresence>{rigged && <RiggedScene key={`${rigged.accuser}-${rigged.accused}-${state.round}`} state={state} txs={txs} />}</AnimatePresence>
+      {rigged && <RiggedScene key={`${rigged.accuser}-${rigged.accused}-${state.round}`} state={state} txs={txs} />}
+
+      <AnimatePresence>
+        {showBanner && fx.banner && (
+          <motion.div
+            key={`banner-${fx.banner.at}`}
+            className="pointer-events-none fixed inset-x-0 top-[13vh] z-30 flex justify-center"
+            initial={{ y: -30, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ opacity: 0 }}
+          >
+            <p
+              className={`rounded-xl border-2 bg-black/85 px-[2vw] py-[0.8vh] font-display text-[3.6vh] tracking-wide ${fx.banner.tone === "money" ? "border-crt text-crt" : "border-brass text-brass"}`}
+            >
+              {name(fx.banner.seat)} {fx.banner.label}
+            </p>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <AnimatePresence>
         {lastCall !== null && (
@@ -112,18 +141,116 @@ export function Overlays({ state, fx, txs }: { state: PublicState; fx: OverlayFx
       </AnimatePresence>
 
       <AnimatePresence>
-        {showGameOver && fx.gameOver && (
-          <motion.div key="gameover" className={`${full} bg-black/85`} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-            <p className="font-crt text-[3vh] tracking-[0.5em] text-ash">LAST ONE STANDING</p>
-            <motion.div initial={{ scale: 0.4 }} animate={{ scale: 1 }} transition={{ type: "spring" }} className="my-[2vh]">
-              <Avatar seat={state.seats[fx.gameOver.winner] ?? { seat: 0, name: "?", kind: "human", hearts: 1 }} size={180} />
-            </motion.div>
-            <h2 className="font-display text-[14vh] leading-none text-brass">🏆 {name(fx.gameOver.winner)}</h2>
-            <p className="mt-[3vh] animate-pulse font-crt text-[3.5vh] tracking-[0.3em]">◀◀ REWINDING THE TAPE…</p>
+        {showPot && fx.potAward && (
+          <motion.div
+            key={`pot-${fx.potAward.at}`}
+            className="pointer-events-none fixed inset-x-0 top-[13vh] z-30 flex flex-col items-center"
+            initial={{ y: -40, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ opacity: 0 }}
+          >
+            <div className="rounded-2xl border-4 border-brass bg-black/85 px-[3vw] py-[1.5vh] text-center">
+              <p className="font-crt text-[2.4vh] tracking-[0.4em] text-ash">END OF ROUND {fx.potAward.round + 1}</p>
+              {fx.potAward.winners.length ? (
+                <p className="font-display text-[6vh] leading-none tracking-wide">
+                  🏦 THE POT GOES TO <span className="text-brass">{fx.potAward.winners.map(name).join(" & ")}</span>
+                  <span className="block text-[4vh] text-crt">
+                    +{fx.potAward.chipsEach} chip{fx.potAward.chipsEach === 1 ? "" : "s"}
+                    {fx.potAward.winners.length > 1 ? " each" : ""} ({dollars(fx.potAward.chipsEach * MONEY.chipCents)})
+                  </span>
+                </p>
+              ) : (
+                <p className="font-display text-[6vh] leading-none tracking-wide">NOBODY BLED. THE POT IS EMPTY.</p>
+              )}
+              {fx.potAward.carried > 0 && <p className="font-crt text-[2.4vh] text-ash">{fx.potAward.carried} chip(s) left over roll into the next pot</p>}
+              <p className="mt-[0.5vh] font-crt text-[2.2vh] text-ash">The chip leader takes the pot. Settled by the referee on-chain.</p>
+            </div>
           </motion.div>
         )}
       </AnimatePresence>
+
+      <AnimatePresence>
+        {buyIns !== null && (
+          <motion.div
+            key="buyins"
+            className="pointer-events-none fixed inset-x-0 top-[13vh] z-30 flex flex-col items-center"
+            initial={{ y: -40, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ opacity: 0 }}
+          >
+            <div className="rounded-2xl border-4 border-crt bg-black/90 px-[3vw] py-[1.5vh] text-center">
+              <p className="font-display text-[6vh] leading-none tracking-wider">💸 BUY BACK IN?</p>
+              <p className="font-type text-[2.8vh] text-bone/80">
+                Not enough chips on the table. {dollars(MONEY.buyInCents)} gets you {MONEY.buyInChips} chips. Tap BUY IN on your phone.
+              </p>
+              <div className="mt-[1vh] flex flex-wrap justify-center gap-[1.5vw] font-crt text-[2.4vh]">
+                {state.seats
+                  .filter((s) => s.chips === 0)
+                  .map((s) => (
+                    <span key={s.seat} className={s.cleanedOut ? "text-ash line-through" : "text-brass"}>
+                      {s.name} {s.bankrollCents !== null ? `(${dollars(s.bankrollCents)})` : ""}
+                    </span>
+                  ))}
+              </div>
+              <p className="font-crt text-[8vh] leading-none text-crt">{buyIns}</p>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {showGameOver && fx.gameOver && <GameOver key="gameover" state={state} over={fx.gameOver} />}
     </>
+  );
+}
+
+function GameOver({ state, over }: { state: PublicState; over: NonNullable<OverlayFx["gameOver"]> }) {
+  const name = (i: number) => state.seats[i]?.name ?? `Seat ${i + 1}`;
+  const ranked = [...over.results].sort((a, b) => b.profitCents - a.profitCents || a.seat - b.seat);
+  const top = over.results.find((r) => r.seat === over.winner);
+  return (
+    <motion.div className={`${full} bg-black/90`} initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+      <p className="font-crt text-[3vh] tracking-[0.5em] text-ash">CASHING OUT · {dollars(MONEY.chipCents)} A CHIP</p>
+      <div className="my-[2vh] flex items-center gap-[2vw]">
+        <motion.div initial={{ scale: 0.4 }} animate={{ scale: 1 }} transition={{ type: "spring" }}>
+          <Avatar seat={state.seats[over.winner] ?? { seat: 0, name: "?", kind: "human" }} size={150} />
+        </motion.div>
+        <div className="text-left">
+          <h2 className="font-display text-[11vh] leading-none text-brass">🏆 {name(over.winner)}</h2>
+          {top && (
+            <p className="font-display text-[5vh] leading-none">
+              <Profit cents={top.profitCents} /> <span className="text-ash">profit</span>
+            </p>
+          )}
+        </div>
+      </div>
+      <table className="font-crt text-[2.8vh]">
+        <thead className="text-[2vh] tracking-widest text-ash">
+          <tr>
+            <th className="px-[1.5vw] text-left">PLAYER</th>
+            <th className="px-[1.5vw]">CHIPS</th>
+            <th className="px-[1.5vw]">BOUGHT IN</th>
+            <th className="px-[1.5vw]">CASHED OUT</th>
+            <th className="px-[1.5vw] text-right">PROFIT</th>
+          </tr>
+        </thead>
+        <tbody>
+          {ranked.map((r, i) => (
+            <motion.tr key={r.seat} initial={{ opacity: 0, x: -30 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.3 + i * 0.12 }} className={r.seat === over.winner ? "text-brass" : ""}>
+              <td className="px-[1.5vw] text-left font-display tracking-wide">{name(r.seat)}</td>
+              <td className="px-[1.5vw]">{r.chips}</td>
+              <td className="px-[1.5vw]">
+                {dollars(r.spentCents)} <span className="text-ash">×{r.buyIns}</span>
+              </td>
+              <td className="px-[1.5vw]">{dollars(r.cashOutCents)}</td>
+              <td className="px-[1.5vw] text-right">
+                <Profit cents={r.profitCents} />
+              </td>
+            </motion.tr>
+          ))}
+        </tbody>
+      </table>
+      <p className="mt-[3vh] animate-pulse font-crt text-[3.5vh] tracking-[0.3em]">◀◀ REWINDING THE TAPE…</p>
+    </motion.div>
   );
 }
 
@@ -137,10 +264,12 @@ function RiggedScene({ state, txs }: { state: PublicState; txs: ChainTx[] }) {
   const name = (i: number) => state.seats[i]?.name ?? `Seat ${i + 1}`;
   const revealTx = [...txs].reverse().find((t) => t.kind === "REVEAL");
   const guilty = r.verdict === "GUILTY";
-  const loser = r.verdict ? (guilty ? r.accused : r.accuser) : null;
+  const moved = r.chipsMoved ?? 0;
+  // Accuser on the left, accused on the right. Guilty: the cheater's chips slide left. Innocent: the accuser pays 1, sliding right.
+  const payer = r.verdict ? (guilty ? r.accused : r.accuser) : null;
 
   return (
-    <motion.div className={`${full} bg-black/90`} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+    <motion.div className={`${full} bg-black/90`} initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
       <AnimatePresence mode="wait">
         {stage === "slam" ? (
           <motion.h2
@@ -155,19 +284,25 @@ function RiggedScene({ state, txs }: { state: PublicState; txs: ChainTx[] }) {
           </motion.h2>
         ) : (
           <motion.div key="open" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex flex-col items-center gap-[3vh]">
-            <div className="flex items-center gap-[4vw]">
+            <div className="relative flex items-center gap-[4vw]">
               <div className="flex flex-col items-center gap-2">
-                <Avatar seat={state.seats[r.accuser]} size={140} />
+                <Avatar seat={state.seats[r.accuser]} size={140} broke={payer === r.accuser && state.seats[r.accuser]?.chips === 0} />
                 <p className="font-display text-[4vh]">{name(r.accuser)}</p>
-                {loser === r.accuser && <HeartBreak />}
+                <p className="font-crt text-[2.2vh] text-ash">{state.seats[r.accuser]?.chips ?? 0} chips</p>
               </div>
-              <motion.p initial={{ x: -30 }} animate={{ x: [0, 20, 0] }} transition={{ repeat: Infinity, duration: 1 }} className="text-[12vh]">
-                👉
-              </motion.p>
+              <div className="relative flex h-[14vh] w-[22vw] items-center justify-center">
+                {r.verdict && moved > 0 ? (
+                  <ChipSlide n={moved} leftward={guilty} />
+                ) : (
+                  <motion.p initial={{ x: -30 }} animate={{ x: [0, 20, 0] }} transition={{ repeat: Infinity, duration: 1 }} className="text-[12vh]">
+                    👉
+                  </motion.p>
+                )}
+              </div>
               <div className="flex flex-col items-center gap-2">
-                <Avatar seat={state.seats[r.accused]} size={140} />
+                <Avatar seat={state.seats[r.accused]} size={140} broke={payer === r.accused && state.seats[r.accused]?.chips === 0} />
                 <p className="font-display text-[4vh]">{name(r.accused)}</p>
-                {loser === r.accused && <HeartBreak />}
+                <p className="font-crt text-[2.2vh] text-ash">{state.seats[r.accused]?.chips ?? 0} chips</p>
               </div>
             </div>
 
@@ -198,6 +333,17 @@ function RiggedScene({ state, txs }: { state: PublicState; txs: ChainTx[] }) {
                 >
                   {r.verdict}
                 </motion.p>
+                <p className="font-display text-[4.5vh] tracking-wide">
+                  {guilty ? (
+                    <>
+                      {name(r.accused)} hands over <span className="text-brass">all {moved} chip{moved === 1 ? "" : "s"}</span> to {name(r.accuser)}
+                    </>
+                  ) : (
+                    <>
+                      {name(r.accuser)} pays {name(r.accused)} <span className="text-brass">1 chip</span> for the slander
+                    </>
+                  )}
+                </p>
                 <div className="flex flex-wrap justify-center gap-3">
                   {guilty ? (
                     r.evidence?.map((e, i) => (
@@ -212,7 +358,7 @@ function RiggedScene({ state, txs }: { state: PublicState; txs: ChainTx[] }) {
                       </motion.div>
                     ))
                   ) : (
-                    <p className="rounded-lg bg-bone px-5 py-3 font-type text-[3.2vh] text-ink">Every envelope said “nothing.” {name(r.accuser)} pays.</p>
+                    <p className="rounded-lg bg-bone px-5 py-3 font-type text-[3.2vh] text-ink">Every envelope said “nothing.”</p>
                   )}
                 </div>
                 {revealTx && (
@@ -229,10 +375,31 @@ function RiggedScene({ state, txs }: { state: PublicState; txs: ChainTx[] }) {
   );
 }
 
-function HeartBreak() {
+/** Chips sliding between the two avatars in the RIGGED! scene. */
+function ChipSlide({ n, leftward }: { n: number; leftward: boolean }) {
+  const from = leftward ? "90%" : "10%";
+  const to = leftward ? "10%" : "90%";
   return (
-    <motion.span initial={{ scale: 1.6 }} animate={{ scale: [1.6, 1, 1.2], rotate: [0, -10, 10, 0], opacity: [1, 1, 0.2] }} transition={{ duration: 1.4 }} className="text-[6vh]">
-      💔
-    </motion.span>
+    <>
+      {Array.from({ length: Math.min(n, 8) }, (_, i) => (
+        <motion.div
+          key={i}
+          className="absolute top-1/2 -translate-x-1/2 -translate-y-1/2"
+          initial={{ left: from, opacity: 0, y: 0 }}
+          animate={{ left: to, opacity: [0, 1, 1, 1], y: [0, -40 - i * 4, 0] }}
+          transition={{ duration: 0.8, delay: 0.4 + i * 0.14, ease: "easeInOut" }}
+        >
+          <ChipIcon size={56} color="#e8b13a" />
+        </motion.div>
+      ))}
+      <motion.p
+        initial={{ opacity: 0, scale: 0.6 }}
+        animate={{ opacity: 1, scale: 1 }}
+        transition={{ delay: 0.5 + Math.min(n, 8) * 0.14 }}
+        className="absolute -bottom-[3vh] font-display text-[4vh] text-brass"
+      >
+        {leftward ? "◀" : ""} {n} chip{n === 1 ? "" : "s"} · {dollars(n * MONEY.chipCents)} {leftward ? "" : "▶"}
+      </motion.p>
+    </>
   );
 }

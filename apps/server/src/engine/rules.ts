@@ -1,23 +1,43 @@
-import { MAX_SHELLS, MIN_SHELLS, type PublicEventKind } from "@blankcheck/shared";
+import { MAX_SHELLS, MIN_SHELLS, MONEY, type Phase, type PublicEventKind } from "@blankcheck/shared";
 import type { Rng } from "./rng";
 import type { GameState, SeatState } from "./types";
 
-export const isAlive = (s: GameState, seat: number): boolean => (s.seats[seat]?.hearts ?? 0) > 0;
+/** Buying in is blocked only while a shot or a verdict is being settled (the chain must stay in order). */
+export const BUY_IN_PHASES: Phase[] = ["LOBBY", "ROUND_START", "AWAIT_AIM", "AWAIT_TRIGGER", "LAST_CALL", "ROUND_END", "BUY_INS"];
 
-export const livingSeats = (s: GameState): number[] => s.seats.filter((x) => x.hearts > 0).map((x) => x.seat);
+/** A seat is in play when it has chips. Broke seats are skipped and can't be targeted. */
+export const inPlay = (s: GameState, seat: number): boolean => (s.seats[seat]?.chips ?? 0) > 0;
+
+export const fundedSeats = (s: GameState): number[] => s.seats.filter((x) => x.chips > 0).map((x) => x.seat);
+
+/** Broke, but still has $12 in the wallet: can buy back in. */
+export const canAfford = (seat: GameState["seats"][number]): boolean =>
+  !seat.cleanedOut && seat.bankrollCents !== null && seat.bankrollCents >= MONEY.buyInCents;
 
 /**
- * Next living seat clockwise after `from` (never `from` itself unless it's the only one alive).
+ * Next seat with chips clockwise after `from` (never `from` itself unless it's the only one).
  * Must match bc_next_seat() in programs/referee/src/blank_check.c.
  */
-export function nextLiving(s: GameState, from: number): number {
+export function nextFunded(s: GameState, from: number): number {
   const n = s.seats.length;
   for (let i = 1; i <= n; i++) {
     const c = (from + i) % n;
-    if (isAlive(s, c)) return c;
+    if (inPlay(s, c)) return c;
   }
   return from;
 }
+
+/**
+ * The chip leaders who split the pot: everyone tied for the most chips (0 chips never leads).
+ * Must match bc_end_round() in blank_check.c.
+ */
+export function potLeaders(s: GameState): number[] {
+  const max = Math.max(0, ...s.seats.map((x) => x.chips));
+  return max > 0 ? s.seats.filter((x) => x.chips === max).map((x) => x.seat) : [];
+}
+
+/** Profit in chips (chips − buy-ins × 3). The on-chain winner uses the same ranking. */
+export const profitChips = (seat: GameState["seats"][number]): number => seat.chips - seat.buyIns * MONEY.buyInChips;
 
 /** total in [2, 8], live in [1, total - 1], shuffled. */
 export function generateShells(rng: Rng): (0 | 1)[] {
@@ -81,15 +101,18 @@ export function newGameState(room: string, config: GameState["config"], tableKey
     countIsOff: false,
     shot: 0,
     window: 0,
+    pot: 0,
     busted: [],
     accuseUsed: [],
     rigged: null,
     lastCallEndsAt: null,
+    buyInsEndAt: null,
     turnStartedAt: null,
     lastShooter: -1,
     pendingShot: null,
     lastShot: null,
     winner: null,
+    results: null,
     log: [],
     logSeq: 0,
     publicShots: [],
@@ -100,5 +123,17 @@ export function newGameState(room: string, config: GameState["config"], tableKey
 }
 
 export function makeSeat(seat: number, name: string, kind: SeatState["kind"], extra: Partial<SeatState> = {}): SeatState {
-  return { seat, name, kind, wallet: "", walletReady: false, hearts: 0, connected: kind === "bot", ...extra };
+  return {
+    seat,
+    name,
+    kind,
+    wallet: "",
+    walletReady: false,
+    chips: 0,
+    buyIns: 0,
+    bankrollCents: null,
+    cleanedOut: false,
+    connected: kind === "bot",
+    ...extra,
+  };
 }

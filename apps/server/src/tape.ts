@@ -1,4 +1,4 @@
-import { toHex, type TapeData } from "@blankcheck/shared";
+import { toHex, type TapeData, type TapeMoney } from "@blankcheck/shared";
 import type { GameState } from "./engine/types";
 import type { Receipt } from "./referee/Referee";
 
@@ -6,7 +6,14 @@ import type { Receipt } from "./referee/Referee";
 export function buildTape(
   s: GameState,
   receipts: Map<string, Receipt>,
-  x: { refereeMode: TapeData["refereeMode"]; tableAddress: string | null; explorerUrl: string; onChainActions: number; failedTxs: number },
+  x: {
+    refereeMode: TapeData["refereeMode"];
+    tableAddress: string | null;
+    explorerUrl: string;
+    onChainActions: number;
+    failedTxs: number;
+    money: TapeMoney;
+  },
 ): TapeData {
   const sig = (tag: string) => receipts.get(tag)?.signature;
   const rounds = s.tape.map((r) => {
@@ -15,6 +22,12 @@ export function buildTape(
     for (const [tag, rc] of receipts) {
       const m = /^seal:(\d+):(\d+)$/.exec(tag);
       if (m && Number(m[1]) === r.round) windowTx.set(Number(m[2]), rc.signature);
+    }
+    // Buy-back chain txs are tagged buyin:<round>:<seat>:<nth buy-in>; hand them out in order.
+    const buyInTxs = new Map<number, (string | undefined)[]>();
+    for (const [tag, rc] of receipts) {
+      const m = /^buyin:(\d+):(\d+):(\d+)$/.exec(tag);
+      if (m && Number(m[1]) === r.round) buyInTxs.set(Number(m[2]), [...(buyInTxs.get(Number(m[2])) ?? []), rc.signature]);
     }
     return {
       ...r,
@@ -33,6 +46,8 @@ export function buildTape(
         revealOk: receipts.get(`tape:${r.round}:${e.seat}`)?.ok,
       })),
       accusations: r.accusations.map((a) => ({ ...a, tx: sig(`accuse:${r.round}:${a.accuser}`) })),
+      buyIns: r.buyIns.map((b) => ({ ...b, tx: buyInTxs.get(b.seat)?.shift() })),
+      pot: r.pot ? { ...r.pot, tx: sig(`endround:${r.round}`) } : null,
     };
   });
   return {
@@ -44,6 +59,7 @@ export function buildTape(
     seats: s.seats.map((seat) => ({ seat: seat.seat, name: seat.name, kind: seat.kind, personality: seat.personality })),
     winner: s.winner ?? 0,
     rounds,
+    money: x.money,
     onChainActions: x.onChainActions,
     failedTxs: x.failedTxs,
   };

@@ -1,7 +1,7 @@
 /*
  * Phase 2 smoke test: play a short all-bot game against the DEPLOYED referee on Thru, print every
  * transaction with its measured latency, then read the Table account back from the RPC node and check
- * it against the game: hearts, winner, every sealed envelope and every shell commitment.
+ * it against the game: chips, buy-ins, pot, winner, every sealed envelope and every shell commitment.
  *
  *   REFEREE_MODE=thru THRU_HOST_SECRET=… REFEREE_PROGRAM_ADDRESS=… pnpm --filter @blankcheck/server chain:smoke
  *   (or put those in apps/server/.env)
@@ -25,16 +25,16 @@ if (referee.mode !== "thru") {
 }
 
 const seats = Number(process.env.SMOKE_SEATS ?? 3);
-const hearts = Number(process.env.SMOKE_HEARTS ?? 1);
+const rounds = Number(process.env.SMOKE_ROUNDS ?? 2);
 const gameId = BigInt(Date.now());
-console.log(`⛓ playing a ${seats}-bot, ${hearts}-heart game on ${config.thruRpcUrl} (game ${gameId})\n`);
+console.log(`⛓ playing a ${seats}-bot, ${rounds}-round game on ${config.thruRpcUrl} (game ${gameId})\n`);
 
 const byKind = new Map<string, number[]>();
 let failed = 0;
 const result = await playHeadless(referee, {
   seed: `smoke-${gameId}`,
   seats,
-  hearts,
+  rounds,
   gameId,
   onReceipt: (r) => {
     if (!r.ok) failed++;
@@ -66,7 +66,9 @@ if (!table) {
   };
   check(table.status === TABLE_STATUS.FINISHED, "status is FINISHED");
   check(table.winner === s.winner, `winner ${table.winner} vs engine ${s.winner}`);
-  check(JSON.stringify(table.hearts.slice(0, seats)) === JSON.stringify(s.seats.map((x) => x.hearts)), "hearts match");
+  check(JSON.stringify(table.chips.slice(0, seats)) === JSON.stringify(s.seats.map((x) => x.chips)), "chips match");
+  check(JSON.stringify(table.buyIns.slice(0, seats)) === JSON.stringify(s.seats.map((x) => x.buyIns)), "buy-ins match");
+  check(table.pot === s.pot, `pot ${table.pot} vs engine ${s.pot}`);
   let hashes = 0;
   for (const r of s.tape) {
     check(toHex(table.shellsCommit(r.round)) === r.commit, `round ${r.round + 1} shell commitment`);

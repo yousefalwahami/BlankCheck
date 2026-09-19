@@ -8,10 +8,12 @@ import { simulateGame } from "../src/sim";
 
 describe("table layout", () => {
   it("matches the C struct size and key offsets", () => {
-    expect(TABLE_SIZE).toBe(74834);
-    expect(TABLE_OFFSETS.hearts).toBe(56);
-    expect(TABLE_OFFSETS.seatWallet).toBe(74);
-    expect(TABLE_OFFSETS.env).toBe(1106);
+    expect(TABLE_SIZE).toBe(74850);
+    expect(TABLE_OFFSETS.pot).toBe(58);
+    expect(TABLE_OFFSETS.chips).toBe(60);
+    expect(TABLE_OFFSETS.buyIns).toBe(72);
+    expect(TABLE_OFFSETS.seatWallet).toBe(90);
+    expect(TABLE_OFFSETS.env).toBe(1122);
   });
 });
 
@@ -26,18 +28,24 @@ describe("full games against the chain mirror", () => {
   const seeds = ["alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf", "hotel", "india", "juliet"];
   for (const [i, seed] of seeds.entries()) {
     const seats = (i % 5) + 2;
-    const hearts = i < 5 ? 2 : 3;
-    it(`game "${seed}" (${seats} seats, ${hearts} hearts): every transaction is accepted and the tape verifies`, async () => {
-      const { state, receipts, referee, tableKey } = await simulateGame({ seed, seats, hearts });
+    const rounds = (i % 4) + 2;
+    const rebuy = [1, 0.8, 0.5, 0][i % 4];
+    it(`game "${seed}" (${seats} seats, ${rounds} rounds, rebuy ${rebuy}): every transaction is accepted and the tape verifies`, async () => {
+      const { state, receipts, referee, tableKey } = await simulateGame({ seed, seats, rounds, rebuy });
       const failed = receipts.filter((r) => !r.ok);
       expect(failed, JSON.stringify(failed)).toEqual([]);
       expect(state.phase).toBe("TAPE");
 
-      // The chain agrees with the engine about who won and everyone's hearts.
+      // The chain agrees with the engine about the winner, every stack, every buy-in, and the pot.
       const t = parseTable(referee.tableData()!)!;
       expect(t.status).toBe(TABLE_STATUS.FINISHED);
       expect(t.winner).toBe(state.winner);
-      expect(t.hearts.slice(0, state.seats.length)).toEqual(state.seats.map((x) => x.hearts));
+      expect(t.chips.slice(0, state.seats.length)).toEqual(state.seats.map((x) => x.chips));
+      expect(t.buyIns.slice(0, state.seats.length)).toEqual(state.seats.map((x) => x.buyIns));
+      expect(t.pot).toBe(state.pot);
+      // Chips are conserved: everything bought is on the table or in the pot.
+      const bought = state.seats.reduce((n, x) => n + x.buyIns * 3, 0);
+      expect(state.seats.reduce((n, x) => n + x.chips, 0) + state.pot).toBe(bought);
 
       // Every revealed envelope and shell order re-hashes to what's stored on "chain".
       const key = toHex(tableKey);
@@ -58,7 +66,7 @@ describe("the referee enforces its rules", () => {
     const ref = new MockReferee();
     const { key } = await ref.prepareTable(7n);
     const host = ref.hostAddress();
-    expect((await ref.createTable({ gameId: 7n, wallets: [host, host, host], hearts: 2 })).ok).toBe(true);
+    expect((await ref.createTable({ gameId: 7n, wallets: [host, host, host], buyInChips: 3, rounds: 2 })).ok).toBe(true);
     const commit = new Uint8Array(32);
     expect((await ref.run({ kind: "commitRound", round: 0, shellCount: 2, liveCount: 1, firstSeat: 1, commit })).ok).toBe(true);
     const wrong = await ref.run({ kind: "pullTrigger", round: 0, shot: 0, shooter: 0, target: 1, auth: { type: "host" } });
@@ -79,7 +87,7 @@ describe("the referee enforces its rules", () => {
     const ref = new MockReferee();
     const { wallet } = await ref.bindWallet("cred", "11".repeat(64));
     const host = ref.hostAddress();
-    await ref.createTable({ gameId: 9n, wallets: [wallet, host], hearts: 2 });
+    await ref.createTable({ gameId: 9n, wallets: [wallet, host], buyInChips: 3, rounds: 2 });
     await ref.run({ kind: "commitRound", round: 0, shellCount: 2, liveCount: 1, firstSeat: 0, commit: new Uint8Array(32) });
     const r = await ref.run({
       kind: "pullTrigger",

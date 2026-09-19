@@ -28,7 +28,8 @@ export interface Referee {
   hostAddress(): string;
   /** Derive the table's address before creating it (every envelope preimage includes it). */
   prepareTable(gameId: bigint): Promise<{ address: string; key: Uint8Array }>;
-  createTable(g: { gameId: bigint; wallets: string[]; hearts: number }): Promise<Receipt>;
+  /** Every seat starts with one buy-in of chips (the lobby buy-in already moved the money). */
+  createTable(g: { gameId: bigint; wallets: string[]; buyInChips: number; rounds: number }): Promise<Receipt>;
   run(call: ChainCall): Promise<Receipt>;
   /** Build the Face ID challenge for a seat action. Called as soon as a target is picked (iOS gesture rules). */
   challengeFor(call: SeatCall, seat: SeatInfo): Promise<{ challenge: string; prepared: unknown }>;

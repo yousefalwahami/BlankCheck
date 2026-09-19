@@ -1,5 +1,5 @@
 import type { Challenge, CheatCode, PrivateView, PublicState, RefereeMode, Seat } from "@blankcheck/shared";
-import { isAlive, publicPLive, shellsLeft } from "./rules";
+import { BUY_IN_PHASES, canAfford, inPlay, publicPLive, shellsLeft } from "./rules";
 import type { GameState } from "./types";
 
 /*
@@ -9,6 +9,7 @@ import type { GameState } from "./types";
 
 export type ViewExtras = {
   refereeMode: RefereeMode;
+  bankMode: RefereeMode;
   tableAddress: string | null;
   explorerUrl: string;
   onChainActions: number;
@@ -22,7 +23,10 @@ export function publicSeat(seat: GameState["seats"][number]): Seat {
     personality: seat.personality,
     wallet: seat.wallet,
     walletReady: seat.walletReady,
-    hearts: seat.hearts,
+    chips: seat.chips,
+    buyIns: seat.buyIns,
+    bankrollCents: seat.bankrollCents,
+    cleanedOut: seat.cleanedOut,
     connected: seat.connected,
   };
 }
@@ -39,16 +43,20 @@ export function publicView(s: GameState, x: ViewExtras): PublicState {
     fired: { ...s.fired },
     shellsLeft: s.round < 0 ? 0 : shellsLeft(s),
     countIsOff: s.countIsOff,
+    pot: s.pot,
     busted: [...s.busted],
     accuseUsed: [...s.accuseUsed],
     rigged: s.rigged
-      ? { accuser: s.rigged.accuser, accused: s.rigged.accused, verdict: s.rigged.verdict, evidence: s.rigged.evidence, txUrl: s.rigged.txUrl }
+      ? { accuser: s.rigged.accuser, accused: s.rigged.accused, verdict: s.rigged.verdict, evidence: s.rigged.evidence, chipsMoved: s.rigged.chipsMoved, txUrl: s.rigged.txUrl }
       : null,
     lastCallEndsAt: s.lastCallEndsAt,
+    buyInsEndAt: s.buyInsEndAt,
     turnStartedAt: s.turnStartedAt,
     winner: s.winner,
+    results: s.results,
     config: { ...s.config },
     refereeMode: x.refereeMode,
+    bankMode: x.bankMode,
     tableAddress: x.tableAddress,
     explorerUrl: x.explorerUrl,
     log: s.log.slice(-20),
@@ -59,7 +67,7 @@ export function publicView(s: GameState, x: ViewExtras): PublicState {
 export function canCheat(s: GameState, seat: number): boolean {
   return (
     (s.phase === "AWAIT_AIM" || s.phase === "AWAIT_TRIGGER") &&
-    isAlive(s, seat) &&
+    inPlay(s, seat) &&
     s.secret.cards[seat] !== undefined &&
     !s.secret.used[seat] &&
     s.shot < s.secret.current.length
@@ -69,9 +77,16 @@ export function canCheat(s: GameState, seat: number): boolean {
 export function canAccuse(s: GameState, seat: number): boolean {
   return (
     (s.phase === "AWAIT_AIM" || s.phase === "AWAIT_TRIGGER" || s.phase === "LAST_CALL") &&
-    isAlive(s, seat) &&
+    inPlay(s, seat) &&
     !s.accuseUsed.includes(seat)
   );
+}
+
+/** Broke (or not yet bought in) with $12 in the wallet, at a moment when buying in is allowed. */
+export function canBuyIn(s: GameState, seat: number): boolean {
+  const x = s.seats[seat];
+  if (!x || x.chips > 0 || !canAfford(x) || !BUY_IN_PHASES.includes(s.phase)) return false;
+  return !(s.phase === "ROUND_END" && s.round + 1 >= s.config.rounds);
 }
 
 export function privateView(s: GameState, seat: number, now: number, challenge: Challenge | null): PrivateView {
@@ -87,6 +102,7 @@ export function privateView(s: GameState, seat: number, now: number, challenge: 
     challenge,
     canCheat: canCheat(s, seat),
     canAccuse: canAccuse(s, seat),
+    canBuyIn: canBuyIn(s, seat),
     credentialId: s.seats[seat]?.credentialId ?? null,
   };
 }
@@ -105,7 +121,7 @@ export function publicOdds(s: GameState): Odds {
 
 /* ───────────── Jev views ───────────── */
 
-type PublicSeatSummary = { seat: number; name: string; hearts: number; busted: boolean; isBot: boolean };
+type PublicSeatSummary = { seat: number; name: string; chips: number; busted: boolean; isBot: boolean };
 
 type PublicBehavior = {
   selfShots: { pLive: number; live: boolean; hesitationMs: number }[];
@@ -121,7 +137,7 @@ export type BotView = {
   me: {
     seat: number;
     name: string;
-    hearts: number;
+    chips: number;
     card: CheatCode | null;
     cardUsed: boolean;
     /** Only if the peek was on the currently chambered shell. Someone may have swapped it since. */
@@ -132,6 +148,7 @@ export type BotView = {
   odds: Odds;
   announced: { live: number; blank: number };
   fired: { live: number; blank: number };
+  pot: number;
 };
 
 /** What the Pit Boss may know: public state and public behavior only. No secret fields exist on this type. */
@@ -157,7 +174,7 @@ function behavior(s: GameState, seat: number): PublicBehavior {
 
 function summary(s: GameState, seat: number): PublicSeatSummary {
   const x = s.seats[seat];
-  return { seat, name: x.name, hearts: x.hearts, busted: s.busted.includes(seat), isBot: x.kind === "bot" };
+  return { seat, name: x.name, chips: x.chips, busted: s.busted.includes(seat), isBot: x.kind === "bot" };
 }
 
 export function botView(s: GameState, seat: number, now: number): BotView {
@@ -169,16 +186,17 @@ export function botView(s: GameState, seat: number, now: number): BotView {
     me: {
       seat,
       name: s.seats[seat].name,
-      hearts: s.seats[seat].hearts,
+      chips: s.seats[seat].chips,
       card,
       cardUsed: !!s.secret.used[seat],
       peekedLive: peek && peek.shell === s.shot && peek.until + 60_000 > now ? peek.live : null,
       usedRiggedThisRound: s.accuseUsed.includes(seat),
     },
-    others: s.seats.filter((x) => x.seat !== seat && x.hearts > 0).map((x) => ({ ...summary(s, x.seat), ...behavior(s, x.seat) })),
+    others: s.seats.filter((x) => x.seat !== seat && x.chips > 0).map((x) => ({ ...summary(s, x.seat), ...behavior(s, x.seat) })),
     odds: publicOdds(s),
     announced: { ...s.announced },
     fired: { ...s.fired },
+    pot: s.pot,
   };
 }
 
@@ -189,6 +207,6 @@ export function pitBossView(s: GameState): PitBossView {
     fired: { ...s.fired },
     countIsOff: s.countIsOff,
     odds: publicOdds(s),
-    seats: s.seats.filter((x) => x.hearts > 0).map((x) => ({ ...summary(s, x.seat), ...behavior(s, x.seat) })),
+    seats: s.seats.filter((x) => x.chips > 0).map((x) => ({ ...summary(s, x.seat), ...behavior(s, x.seat) })),
   };
 }

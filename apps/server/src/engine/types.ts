@@ -1,4 +1,5 @@
 import type {
+  CashOutResult,
   CheatCode,
   Fx,
   GameConfig,
@@ -73,10 +74,13 @@ export type GameState = {
   shot: number;
   /** Next seal window this round. */
   window: number;
+  /** Chips knocked off by live shells this round (the leader takes it at round end). */
+  pot: number;
   busted: number[];
   accuseUsed: number[];
   rigged: (RiggedState & { resumePhase: Phase }) | null;
   lastCallEndsAt: number | null;
+  buyInsEndAt: number | null;
   turnStartedAt: number | null;
   lastShooter: number;
   /** Set by PULL, consumed by FIRE. */
@@ -84,6 +88,8 @@ export type GameState = {
   /** Set by FIRE, consumed by ADVANCE. */
   lastShot: { shooter: number; target: number; live: boolean; again: boolean } | null;
   winner: number | null;
+  /** Set at game over: everyone cashed out at $4 a chip. */
+  results: CashOutResult[] | null;
   log: PublicEvent[];
   logSeq: number;
   publicShots: PublicShot[];
@@ -103,7 +109,11 @@ export type ChainCall =
   | { kind: "seal"; round: number; window: number; envelopes: Uint8Array[] }
   | { kind: "accuse"; round: number; accuser: number; accused: number; auth: SeatAuth }
   | { kind: "reveal"; round: number; seat: number; mode: 0 | 1; entries: { cheat: number; shell: number; salt: Uint8Array }[] }
-  | { kind: "revealShells"; round: number; shells: number[]; salt: Uint8Array };
+  | { kind: "revealShells"; round: number; shells: number[]; salt: Uint8Array }
+  /** A broke seat bought back in. The referee stores the $12 token transfer's signature next to the chips. */
+  | { kind: "buyIn"; round: number; seat: number; paymentTx?: string }
+  /** Award the pot to the chip leader; after the last round this also finishes the game. */
+  | { kind: "endRound"; round: number };
 
 export type Action =
   | { type: "START" }
@@ -117,6 +127,10 @@ export type Action =
   | { type: "VERDICT" }
   | { type: "RESUME" }
   | { type: "LAST_CALL_END" }
+  /** $12 → 3 chips. The room has already moved the money; paymentTx is the transfer signature. */
+  | { type: "BUY_IN"; seat: number; paymentTx?: string }
+  | { type: "NEXT_ROUND" }
+  | { type: "BUY_INS_END" }
   | { type: "TAPE" };
 
 export type Effect =
@@ -126,6 +140,8 @@ export type Effect =
   | { type: "cancelTimer"; key: string }
   | { type: "fx"; fx: Fx }
   | { type: "toast"; seat: number; text: string }
+  /** Game over: pay everyone out (chips × $4) from the cashier. */
+  | { type: "cashOut"; results: CashOutResult[] }
   /** Game over: send every tape reveal to the chain, then show the tape. */
   | { type: "tape" };
 

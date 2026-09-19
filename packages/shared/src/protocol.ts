@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { BOT_IDS, MAX_SEATS } from "./constants";
+import { BOT_IDS, DEFAULT_ROUNDS, MAX_GAME_ROUNDS, MAX_SEATS } from "./constants";
 
 /* Socket.IO event names. Payloads from clients are validated with the schemas below. */
 export const C2S = {
@@ -18,6 +18,9 @@ export const C2S = {
   riggedStart: "rigged:start",
   riggedSigned: "rigged:signed",
   riggedCancel: "rigged:cancel",
+  /** Ask for a Face ID challenge to buy in (2 → 3 chips). */
+  buyInStart: "bank:buyin",
+  buyInSigned: "bank:buyin:signed",
   boo: "ghost:boo",
 } as const;
 
@@ -38,14 +41,14 @@ const roomCode = z
   .regex(/^[A-Z]{4}$/, "Room codes are 4 letters");
 
 export const RoomCreateSchema = z.object({
-  hearts: z.number().int().min(1).max(5).default(3),
+  rounds: z.number().int().min(1).max(MAX_GAME_ROUNDS).default(DEFAULT_ROUNDS),
   faceIdOnTrigger: z.boolean().default(true),
 });
 
 export const HostAttachSchema = z.object({ room: roomCode, hostToken: z.string().min(8).max(128) });
 
 export const HostConfigSchema = z.object({
-  hearts: z.number().int().min(1).max(5).optional(),
+  rounds: z.number().int().min(1).max(MAX_GAME_ROUNDS).optional(),
   faceIdOnTrigger: z.boolean().optional(),
 });
 
@@ -57,6 +60,8 @@ export const RoomJoinSchema = z.object({
   name: z.string().trim().min(1).max(16),
   /** Random id kept by the phone so a refresh gets the same seat back. */
   playerId: z.string().min(8).max(64),
+  /** The phone has a Face ID passkey and will bind it right after joining. */
+  passkey: z.boolean().optional(),
 });
 
 export const WalletBindSchema = z.object({
