@@ -87,7 +87,16 @@ async function header(feePayer: string) {
     const acct = await t.accounts.get(feePayer);
     headerCache.nonce = acct.meta?.nonce ?? 0n;
   }
-  return { fee: 0n, nonce: headerCache.nonce, startSlot: headerCache.slot, chainId: headerCache.chainId, expiryAfter: 100 };
+  return {
+    fee: 0n,
+    nonce: headerCache.nonce,
+    startSlot: headerCache.slot,
+    chainId: headerCache.chainId,
+    expiryAfter: 100,
+    computeUnits: config.txComputeUnits,
+    stateUnits: config.txStateUnits,
+    memoryUnits: config.txMemoryUnits,
+  };
 }
 
 export class ThruReferee implements Referee {

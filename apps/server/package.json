@@ -8,7 +8,8 @@
     "start": "tsx --env-file-if-exists=.env src/index.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "trace": "tsx src/scripts/trace.ts"
+    "trace": "tsx src/scripts/trace.ts",
+    "chain:smoke": "tsx --env-file-if-exists=.env src/scripts/chain-smoke.ts"
   },
   "dependencies": {
     "@blankcheck/shared": "workspace:^",

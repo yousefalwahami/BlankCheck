@@ -18,6 +18,10 @@ export const config = {
   thruHostSecret: env.THRU_HOST_SECRET ?? "",
   refereeProgramAddress: env.REFEREE_PROGRAM_ADDRESS ?? "",
   passkeyManagerProgramAddress: env.PASSKEY_MANAGER_PROGRAM_ADDRESS ?? "",
+  /** Optional per-tx resource requests (SDK defaults otherwise). CREATE_TABLE allocates ~75 KB. */
+  txComputeUnits: env.THRU_COMPUTE_UNITS ? Number(env.THRU_COMPUTE_UNITS) : undefined,
+  txStateUnits: env.THRU_STATE_UNITS ? Number(env.THRU_STATE_UNITS) : undefined,
+  txMemoryUnits: env.THRU_MEMORY_UNITS ? Number(env.THRU_MEMORY_UNITS) : undefined,
   typesafeApiKey: env.TYPESAFE_API_KEY ?? "",
   jevModel: env.JEV_MODEL ?? "",
   demoSeed: env.DEMO_SEED ?? "",

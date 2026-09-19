@@ -1,17 +1,27 @@
-import { fromHex, randomBytes } from "@blankcheck/shared";
+import { randomBytes } from "@blankcheck/shared";
 import { seededRng, type Rng } from "./engine/rng";
 import { makeSeat, newGameState, livingSeats, isAlive } from "./engine/rules";
 import { step } from "./engine/step";
-import type { Action, GameState } from "./engine/types";
+import type { Action, ChainCall, GameState } from "./engine/types";
 import { canAccuse, canCheat } from "./engine/views";
 import { MockReferee } from "./referee/MockReferee";
-import type { Receipt } from "./referee/Referee";
+import type { Receipt, Referee } from "./referee/Referee";
+
+export type HeadlessOpts = {
+  seed: string;
+  seats?: number;
+  hearts?: number;
+  deterministicSalts?: boolean;
+  gameId?: bigint;
+  /** Called after every chain receipt (the chain smoke test prints these live). */
+  onReceipt?: (r: Receipt, call: ChainCall | "createTable") => void;
+};
 
 /**
- * Plays a whole game headlessly with random legal moves against MockReferee.
- * Used by tests (every chain call must be accepted) and to record a trace for the C host test.
+ * Plays a whole game headlessly with random legal moves against any referee. Every seat is a bot
+ * signed by the house key. Used by tests (MockReferee), the C trace recorder, and the chain smoke test.
  */
-export async function simulateGame(opts: { seed: string; seats?: number; hearts?: number; trace?: boolean; deterministicSalts?: boolean }) {
+export async function playHeadless(referee: Referee, opts: HeadlessOpts) {
   const rng = seededRng(opts.seed);
   const policy = seededRng(`${opts.seed}:policy`);
   let saltN = 0;
@@ -23,16 +33,17 @@ export async function simulateGame(opts: { seed: string; seats?: number; hearts?
       }
     : () => randomBytes(32);
 
-  const referee = new MockReferee();
-  if (opts.trace) referee.trace = [];
-  const gameId = BigInt(rng.int(1, 2 ** 31));
-  const { key } = await referee.prepareTable(gameId);
+  const seededId = BigInt(rng.int(1, 2 ** 31));
+  const gameId = opts.gameId ?? seededId; // a real chain needs a fresh table per run
+  const { key, address } = await referee.prepareTable(gameId);
   let s = newGameState("SIMS", { hearts: opts.hearts ?? 2, faceIdOnTrigger: false }, key);
   const n = opts.seats ?? 4;
   for (let i = 0; i < n; i++) s.seats.push(makeSeat(i, `Bot${i}`, "bot", { wallet: referee.hostAddress(), walletReady: true }));
 
   const receipts: Receipt[] = [];
-  receipts.push(await referee.createTable({ gameId, wallets: s.seats.map((x) => x.wallet), hearts: s.config.hearts }));
+  const created = await referee.createTable({ gameId, wallets: s.seats.map((x) => x.wallet), hearts: s.config.hearts });
+  receipts.push(created);
+  opts.onReceipt?.(created, "createTable");
 
   let clock = 1_000;
   let timer: Action | null = null;
@@ -48,6 +59,7 @@ export async function simulateGame(opts: { seed: string; seats?: number; hearts?
       if (e.type === "chain") {
         const rc = await referee.run(e.call);
         receipts.push(rc);
+        opts.onReceipt?.(rc, e.call);
         if (e.then) thenQueue.push(e.then);
       } else if (e.type === "timer") timer = e.action;
       else if (e.type === "cancelTimer") timer = null;
@@ -71,7 +83,15 @@ export async function simulateGame(opts: { seed: string; seats?: number; hearts?
     }
     throw new Error(`simulation stuck in ${s.phase}`);
   }
-  return { state: s, receipts, referee, gameId, tableKey: key };
+  return { state: s, receipts, gameId, tableKey: key, tableAddress: address };
+}
+
+/** playHeadless against the in-memory chain mirror. */
+export async function simulateGame(opts: HeadlessOpts & { trace?: boolean }) {
+  const referee = new MockReferee();
+  if (opts.trace) referee.trace = [];
+  const out = await playHeadless(referee, opts);
+  return { ...out, referee };
 }
 
 async function randomMove(s: GameState, p: Rng, dispatch: (a: Action) => Promise<string | undefined>): Promise<boolean> {
@@ -106,5 +126,3 @@ async function randomMove(s: GameState, p: Rng, dispatch: (a: Action) => Promise
   }
   return false;
 }
-
-export { fromHex };
