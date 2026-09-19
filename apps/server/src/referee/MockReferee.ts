@@ -2,8 +2,10 @@ import { randomBytes, sha256, toHex, fromHex } from "@blankcheck/shared";
 import type { ChainCall } from "../engine/types";
 import {
   encAccuse,
+  encBuyIn,
   encCommitRound,
   encCreateTable,
+  encEndRound,
   encPullTrigger,
   encResolveShot,
   encReveal,
@@ -50,11 +52,11 @@ export class MockReferee implements Referee {
     return { address: toHex(key), key };
   }
 
-  async createTable(g: { gameId: bigint; wallets: string[]; hearts: number }): Promise<Receipt> {
+  async createTable(g: { gameId: bigint; wallets: string[]; buyInChips: number; rounds: number }): Promise<Receipt> {
     const { key } = await this.prepareTable(g.gameId);
     const wallets = g.wallets.map((w) => fromHex(w));
     this.table = { gameId: g.gameId, key, wallets };
-    const ix = encCreateTable({ tableIdx: 2, gameId: g.gameId, hearts: g.hearts, wallets, proof: new Uint8Array(0) });
+    const ix = encCreateTable({ tableIdx: 2, gameId: g.gameId, buyInChips: g.buyInChips, rounds: g.rounds, wallets, proof: new Uint8Array(0) });
     return this.exec("CREATE_TABLE", ix, [this.host, this.program, key], new Set(), "host");
   }
 
@@ -93,6 +95,10 @@ export class MockReferee implements Referee {
         return this.exec(call.mode === 0 ? "REVEAL" : "REVEAL_TAPE", encReveal({ ...base, ...call }), accounts, authorized, "host");
       case "revealShells":
         return this.exec("REVEAL_SHELLS", encRevealShells({ ...base, ...call }), accounts, authorized, "host");
+      case "buyIn":
+        return this.exec("BUY_IN", encBuyIn({ ...base, round: call.round, seat: call.seat, payment: new Uint8Array(64) }), accounts, authorized, "host");
+      case "endRound":
+        return this.exec("END_ROUND", encEndRound({ ...base, round: call.round }), accounts, authorized, "host");
       case "pullTrigger":
       case "accuse": {
         const seat = call.kind === "pullTrigger" ? call.shooter : call.accuser;

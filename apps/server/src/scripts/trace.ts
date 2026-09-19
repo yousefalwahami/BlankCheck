@@ -24,15 +24,16 @@ const lines: string[] = [];
 const finals: string[] = [];
 
 // 1. Full games, each on its own table.
-for (const [seed, seats, hearts] of [
-  ["trace-a", 4, 2],
-  ["trace-b", 6, 3],
-  ["trace-c", 2, 2],
+for (const [seed, seats, rounds, rebuy] of [
+  ["trace-a", 4, 3, 0.8],
+  ["trace-b", 6, 4, 1],
+  ["trace-c", 2, 3, 0.3],
 ] as const) {
-  const game = await simulateGame({ seed, seats, hearts, trace: true, deterministicSalts: true });
+  const game = await simulateGame({ seed, seats, rounds, rebuy, trace: true, deterministicSalts: true });
   const failed = game.referee.trace!.filter((e) => !e.ok);
   if (failed.length) throw new Error(`${seed}: ${failed.length} failed instructions in a valid game`);
-  lines.push(`# game ${seed}: ${seats} seats, ${hearts} hearts, ${game.state.tape.length} rounds, winner seat ${game.state.winner}`);
+  const buyIns = game.state.seats.reduce((n, x) => n + x.buyIns, 0);
+  lines.push(`# game ${seed}: ${seats} seats, ${game.state.tape.length}/${rounds} rounds, ${buyIns} buy-ins, winner seat ${game.state.winner}`);
   lines.push(...game.referee.trace!.map(line));
   finals.push(`F ${toHex(game.tableKey)} ${toHex(sha256(game.referee.tableData()!))}`);
 }
@@ -44,8 +45,8 @@ for (const [seed, seats, hearts] of [
   const { wallet } = await ref.bindWallet("cred", "11".repeat(64));
   const host = ref.hostAddress();
   const { key } = await ref.prepareTable(424242n);
-  await ref.createTable({ gameId: 424242n, wallets: [wallet, host, host], hearts: 2 });
-  await ref.createTable({ gameId: 424242n, wallets: [wallet, host, host], hearts: 2 }); // CREATE: already exists
+  await ref.createTable({ gameId: 424242n, wallets: [wallet, host, host], buyInChips: 3, rounds: 2 });
+  await ref.createTable({ gameId: 424242n, wallets: [wallet, host, host], buyInChips: 3, rounds: 2 }); // CREATE: already exists
   await ref.run({ kind: "commitRound", round: 1, shellCount: 2, liveCount: 1, firstSeat: 0, commit: new Uint8Array(32) }); // ROUND
   await ref.run({ kind: "commitRound", round: 0, shellCount: 2, liveCount: 2, firstSeat: 0, commit: new Uint8Array(32) }); // ARGS
   await ref.run({ kind: "commitRound", round: 0, shellCount: 2, liveCount: 1, firstSeat: 1, commit: new Uint8Array(32).fill(5) });
@@ -60,6 +61,9 @@ for (const [seed, seats, hearts] of [
   await ref.run({ kind: "accuse", round: 0, accuser: 1, accused: 2, auth: { type: "host" } }); // PENDING
   await ref.run({ kind: "reveal", round: 0, seat: 1, mode: 0, entries: [{ cheat: 0, shell: 255, salt: new Uint8Array(32) }] }); // HASH
   await ref.run({ kind: "revealShells", round: 0, shells: [0, 1], salt: new Uint8Array(32) }); // STATUS (game not over)
+  await ref.run({ kind: "buyIn", round: 0, seat: 2 }); // CHIPS: seat 2 still has chips
+  await ref.run({ kind: "endRound", round: 0 }); // PENDING: the accusation is still open
+  await ref.run({ kind: "commitRound", round: 1, shellCount: 3, liveCount: 1, firstSeat: 0, commit: new Uint8Array(32) }); // ROUND: round 0 never ended
   lines.push("# refusals");
   lines.push(...ref.trace.map(line));
 

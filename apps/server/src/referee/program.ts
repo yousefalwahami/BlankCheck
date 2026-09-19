@@ -45,6 +45,7 @@ export const ERR = {
   RESIZE: 0x2010,
   SHOT: 0x2011,
   EVENT: 0x2012,
+  CHIPS: 0x2013,
 } as const;
 
 export const ERR_NAMES: Record<number, string> = Object.fromEntries(Object.entries(ERR).map(([k, v]) => [v, k]));
@@ -70,6 +71,14 @@ const fail = (code: number): never => {
   throw new Revert(code);
 };
 
+type G = { t: Uint8Array; T: DataView; events: Uint8Array[] };
+
+const chips = (g: G, i: number) => g.T.getUint16(O.chips + 2 * i, true);
+const setChips = (g: G, i: number, v: number) => g.T.setUint16(O.chips + 2 * i, v, true);
+const pot = (g: G) => g.T.getUint16(O.pot, true);
+const setPot = (g: G, v: number) => g.T.setUint16(O.pot, v, true);
+const u8 = (v: number) => Math.min(v, 255);
+
 export function execute(ix: Uint8Array, ctx: ExecCtx): Uint8Array[] {
   const events: Uint8Array[] = [];
   if (ix.length < 6) fail(ERR.SHORT);
@@ -88,7 +97,7 @@ export function execute(ix: Uint8Array, ctx: ExecCtx): Uint8Array[] {
   if (!t || t.length < TABLE_SIZE) fail(ERR.NOT_TABLE);
   for (let i = 0; i < 4; i++) if (t![i] !== TABLE_MAGIC[i]) fail(ERR.NOT_TABLE);
   const table = t!;
-  const T = new DataView(table.buffer, table.byteOffset, table.byteLength);
+  const g: G = { t: table, T: new DataView(table.buffer, table.byteOffset, table.byteLength), events };
   const host = () => {
     if (!bytesEqual(ctx.accounts[0], table.subarray(O.host, O.host + 32))) fail(ERR.NOT_HOST);
   };
@@ -98,7 +107,6 @@ export function execute(ix: Uint8Array, ctx: ExecCtx): Uint8Array[] {
     if (!bytesEqual(ctx.accounts[walletIdx], w)) fail(ERR.NOT_SEAT);
     if (walletIdx !== 0 && !ctx.authorized.has(walletIdx)) fail(ERR.NOT_SEAT);
   };
-  const g = { t: table, T, events };
   const n = table[O.numSeats];
 
   switch (kind) {
@@ -109,18 +117,16 @@ export function execute(ix: Uint8Array, ctx: ExecCtx): Uint8Array[] {
       if (table[O.status] !== TABLE_STATUS.PLAYING) fail(ERR.STATUS);
       const cur = table[O.round];
       if (round !== (cur === ROUND_NONE ? 0 : cur + 1)) fail(ERR.ROUND);
-      if (cur !== ROUND_NONE) {
-        if (table[O.shot] < table[O.shellCount + cur]) fail(ERR.SHOT);
-        if (table[O.triggerPulled] || table[O.pendingAccused] !== NO_SEAT) fail(ERR.PENDING);
-      }
+      if (!table[O.roundEnded]) fail(ERR.ROUND);
       if (shellCount === 0) {
-        finishByHearts(g);
+        finishByProfit(g, 1);
         return events;
       }
-      if (round >= MAX_ROUNDS) fail(ERR.ROUND);
+      if (round >= MAX_ROUNDS || round >= table[O.roundsTotal]) fail(ERR.ROUND);
       if (shellCount < MIN_SHELLS || shellCount > MAX_SHELLS || liveCount < 1 || liveCount >= shellCount) fail(ERR.ARGS);
-      if (firstSeat >= n || table[O.hearts + firstSeat] === 0) fail(ERR.TURN);
+      if (firstSeat >= n || chips(g, firstSeat) === 0) fail(ERR.TURN);
       table[O.round] = round;
+      table[O.roundEnded] = 0;
       table.set(ix.subarray(10, 42), O.shellsCommit + round * 32);
       table[O.shellCount + round] = shellCount;
       table[O.liveCount + round] = liveCount;
@@ -140,10 +146,10 @@ export function execute(ix: Uint8Array, ctx: ExecCtx): Uint8Array[] {
       const walletIdx = dv.getUint16(6, true);
       const [round, shot, shooter, target] = [ix[8], ix[9], ix[10], ix[11]];
       if (table[O.status] !== TABLE_STATUS.PLAYING) fail(ERR.STATUS);
-      if (table[O.round] === ROUND_NONE || round !== table[O.round]) fail(ERR.ROUND);
+      if (table[O.round] === ROUND_NONE || round !== table[O.round] || table[O.roundEnded]) fail(ERR.ROUND);
       if (shot !== table[O.shot] || shot >= table[O.shellCount + round]) fail(ERR.SHOT);
       if (shooter >= n || target >= n) fail(ERR.ARGS);
-      if (shooter !== table[O.currentSeat] || table[O.hearts + shooter] === 0 || table[O.hearts + target] === 0) fail(ERR.TURN);
+      if (shooter !== table[O.currentSeat] || chips(g, shooter) === 0 || chips(g, target) === 0) fail(ERR.TURN);
       if (table[O.triggerPulled] || table[O.pendingAccused] !== NO_SEAT) fail(ERR.PENDING);
       seatAuth(walletIdx, shooter);
       table[O.triggerPulled] = 1;
@@ -165,15 +171,18 @@ export function execute(ix: Uint8Array, ctx: ExecCtx): Uint8Array[] {
       if (isLive > 1) fail(ERR.ARGS);
       const shooter = table[O.currentSeat];
       const target = table[O.pendingTarget];
-      if (isLive && table[O.hearts + target] > 0) table[O.hearts + target] -= 1;
+      // A live hit knocks one chip into the pot.
+      if (isLive && chips(g, target) > 0) {
+        setChips(g, target, chips(g, target) - 1);
+        setPot(g, pot(g) + 1);
+      }
       storeEnvelopes(table, round, window, ix.subarray(11), cnt);
       table[O.shot] = shot + 1;
       table[O.triggerPulled] = 0;
       table[O.pendingTarget] = NO_SEAT;
-      emit(g, EVT.SHOT_RESOLVED, round, shot, shooter, target, isLive, table[O.hearts + target]);
-      if (!checkGameOver(g)) {
-        if (!(isLive === 0 && target === shooter)) table[O.currentSeat] = nextLiving(table, shooter);
-      }
+      emit(g, EVT.SHOT_RESOLVED, round, shot, shooter, target, isLive, u8(chips(g, target)));
+      // A blank on yourself means you go again; otherwise the next seat with chips.
+      if (!(isLive === 0 && target === shooter)) table[O.currentSeat] = nextFunded(g, shooter);
       return events;
     }
 
@@ -196,9 +205,9 @@ export function execute(ix: Uint8Array, ctx: ExecCtx): Uint8Array[] {
       const walletIdx = dv.getUint16(6, true);
       const [round, accuser, accused] = [ix[8], ix[9], ix[10]];
       if (table[O.status] !== TABLE_STATUS.PLAYING) fail(ERR.STATUS);
-      if (round !== table[O.round]) fail(ERR.ROUND);
+      if (round !== table[O.round] || table[O.roundEnded]) fail(ERR.ROUND);
       if (accuser >= n || accused >= n || accuser === accused) fail(ERR.ARGS);
-      if (table[O.hearts + accuser] === 0 || table[O.hearts + accused] === 0) fail(ERR.TURN);
+      if (chips(g, accuser) === 0 || chips(g, accused) === 0) fail(ERR.TURN);
       if (table[O.accuseUsed + accuser] || table[O.busted + accused]) fail(ERR.ACCUSE);
       if (table[O.pendingAccused] !== NO_SEAT || table[O.triggerPulled]) fail(ERR.PENDING);
       seatAuth(walletIdx, accuser);
@@ -238,16 +247,19 @@ export function execute(ix: Uint8Array, ctx: ExecCtx): Uint8Array[] {
         if (mode === 1) emit(g, EVT.ENVELOPE_OPENED, round, i, seat, NO_SEAT, cheat, shell);
       }
       if (mode === 0) {
+        // Guilty: the accuser takes ALL of the cheater's chips. Wrong call: the accuser pays one.
         const accuser = table[O.pendingAccuser];
-        const loser = guilty ? seat : accuser;
-        if (table[O.hearts + loser] > 0) table[O.hearts + loser] -= 1;
+        const from = guilty ? seat : accuser;
+        const to = guilty ? accuser : seat;
+        const moved = guilty ? chips(g, seat) : Math.min(1, chips(g, accuser));
+        setChips(g, from, chips(g, from) - moved);
+        setChips(g, to, chips(g, to) + moved);
         if (guilty) table[O.busted + seat] = 1;
         clearPending(table);
-        emit(g, EVT.VERDICT, round, table[O.window], accuser, seat, guilty, loser);
-        if (!checkGameOver(g)) {
-          const cur = table[O.currentSeat];
-          if (table[O.hearts + cur] === 0) table[O.currentSeat] = nextLiving(table, cur);
-        }
+        emit(g, EVT.VERDICT, round, table[O.window], accuser, seat, guilty, u8(moved));
+        // A shooter who went broke in a verdict passes the gun on.
+        const cur = table[O.currentSeat];
+        if (chips(g, cur) === 0) table[O.currentSeat] = nextFunded(g, cur);
       }
       return events;
     }
@@ -273,40 +285,81 @@ export function execute(ix: Uint8Array, ctx: ExecCtx): Uint8Array[] {
       return events;
     }
 
+    case IX.BUY_IN: {
+      if (ix.length !== 6 + 2 + 64) fail(ERR.SHORT);
+      host();
+      const [round, seat] = [ix[6], ix[7]];
+      if (table[O.status] !== TABLE_STATUS.PLAYING) fail(ERR.STATUS);
+      if (table[O.round] === ROUND_NONE || round !== table[O.round]) fail(ERR.ROUND);
+      if (seat >= n) fail(ERR.ARGS);
+      if (chips(g, seat) !== 0) fail(ERR.CHIPS);
+      if (table[O.triggerPulled] || table[O.pendingAccused] !== NO_SEAT) fail(ERR.PENDING);
+      setChips(g, seat, table[O.buyInChips]);
+      table[O.buyIns + seat] = u8(table[O.buyIns + seat] + 1);
+      emit(g, EVT.BUY_IN, round, 0, seat, NO_SEAT, table[O.buyInChips], table[O.buyIns + seat]);
+      return events;
+    }
+
+    case IX.END_ROUND: {
+      if (ix.length !== 6 + 1) fail(ERR.SHORT);
+      host();
+      const round = ix[6];
+      if (table[O.status] !== TABLE_STATUS.PLAYING) fail(ERR.STATUS);
+      if (table[O.round] === ROUND_NONE || round !== table[O.round] || table[O.roundEnded]) fail(ERR.ROUND);
+      if (table[O.triggerPulled] || table[O.pendingAccused] !== NO_SEAT) fail(ERR.PENDING);
+      if (table[O.shot] < table[O.shellCount + round] && funded(g) >= 2) fail(ERR.SHOT);
+      // The pot goes to the chip leader(s); an uneven split leaves the remainder in the pot.
+      let max = 0;
+      for (let i = 0; i < n; i++) max = Math.max(max, chips(g, i));
+      let mask = 0;
+      let count = 0;
+      if (max > 0) for (let i = 0; i < n; i++) if (chips(g, i) === max) (mask |= 1 << i), count++;
+      const each = count ? Math.floor(pot(g) / count) : 0;
+      for (let i = 0; i < n; i++) if (mask & (1 << i)) setChips(g, i, chips(g, i) + each);
+      setPot(g, pot(g) - each * count);
+      table[O.roundEnded] = 1;
+      emit(g, EVT.POT_AWARDED, round, 0, mask, NO_SEAT, u8(each), u8(pot(g)));
+      if (round + 1 >= table[O.roundsTotal]) finishByProfit(g, 0);
+      return events;
+    }
+
     default:
       return fail(ERR.BAD_IX);
   }
 
   function createTable(ix: Uint8Array, dv: DataView, ctx: ExecCtx, addr: Uint8Array, events: Uint8Array[]) {
-    if (ix.length < 16) fail(ERR.SHORT);
+    if (ix.length < 17) fail(ERR.SHORT);
     const gameId = dv.getBigUint64(6, true);
     const n = ix[14];
-    const hearts = ix[15];
-    if (n < 2 || n > MAX_SEATS || hearts < 1 || hearts > 5) fail(ERR.ARGS);
-    if (ix.length < 16 + 32 * n + 4) fail(ERR.SHORT);
-    const proofSz = dv.getUint32(16 + 32 * n, true);
-    if (ix.length !== 16 + 32 * n + 4 + proofSz) fail(ERR.SHORT);
+    const buyInChips = ix[15];
+    const rounds = ix[16];
+    if (n < 2 || n > MAX_SEATS || buyInChips < 1 || buyInChips > 10 || rounds < 1 || rounds > MAX_ROUNDS) fail(ERR.ARGS);
+    if (ix.length < 17 + 32 * n + 4) fail(ERR.SHORT);
+    const proofSz = dv.getUint32(17 + 32 * n, true);
+    if (ix.length !== 17 + 32 * n + 4 + proofSz) fail(ERR.SHORT);
     if (ctx.store.has(hex(addr))) fail(ERR.CREATE);
     const t = new Uint8Array(TABLE_SIZE);
+    const g: G = { t, T: new DataView(t.buffer), events };
     t.set(TABLE_MAGIC, O.magic);
     t.set(ctx.accounts[0], O.host);
-    new DataView(t.buffer).setBigUint64(O.gameId, gameId, true);
+    g.T.setBigUint64(O.gameId, gameId, true);
     t[O.status] = TABLE_STATUS.PLAYING;
     t[O.numSeats] = n;
-    t[O.startHearts] = hearts;
+    t[O.buyInChips] = buyInChips;
+    t[O.roundsTotal] = rounds;
     t[O.round] = ROUND_NONE;
+    t[O.roundEnded] = 1;
     clearPending(t);
     t[O.winner] = NO_SEAT;
     for (let i = 0; i < n; i++) {
-      t[O.hearts + i] = hearts;
-      t.set(ix.subarray(16 + 32 * i, 16 + 32 * i + 32), O.seatWallet + 32 * i);
+      setChips(g, i, buyInChips); // everyone bought in at the lobby
+      t[O.buyIns + i] = 1;
+      t.set(ix.subarray(17 + 32 * i, 17 + 32 * i + 32), O.seatWallet + 32 * i);
     }
     ctx.store.set(hex(addr), t);
-    emit({ t, T: new DataView(t.buffer), events }, EVT.TABLE_CREATED, 0, 0, NO_SEAT, NO_SEAT, n, hearts);
+    emit(g, EVT.TABLE_CREATED, 0, 0, NO_SEAT, NO_SEAT, n, buyInChips);
   }
 }
-
-type G = { t: Uint8Array; T: DataView; events: Uint8Array[] };
 
 function emit(g: G, kind: number, round: number, windowOrShot: number, seatA: number, seatB: number, value: number, value2: number) {
   g.events.push(encodeRefereeEvent({ kind, round, windowOrShot, seatA, seatB, value, value2, gameId: g.T.getBigUint64(O.gameId, true) }));
@@ -325,38 +378,29 @@ function storeEnvelopes(t: Uint8Array, round: number, window: number, env: Uint8
   t[O.windowCount + round] = window + 1;
 }
 
-/** Must match nextLiving() in apps/server/src/engine/rules.ts. */
-export function nextLiving(t: Uint8Array, from: number): number {
-  const n = t[O.numSeats];
+/** Must match nextFunded() in apps/server/src/engine/rules.ts. */
+function nextFunded(g: G, from: number): number {
+  const n = g.t[O.numSeats];
   for (let i = 1; i <= n; i++) {
     const c = (from + i) % n;
-    if (t[O.hearts + c] > 0) return c;
+    if (chips(g, c) > 0) return c;
   }
   return from;
 }
 
-function checkGameOver(g: G): boolean {
-  const t = g.t;
-  let alive = 0;
-  let last = NO_SEAT;
-  for (let i = 0; i < t[O.numSeats]; i++) {
-    if (t[O.hearts + i] > 0) {
-      alive++;
-      last = i;
-    }
-  }
-  if (alive > 1) return false;
-  t[O.status] = TABLE_STATUS.FINISHED;
-  t[O.winner] = last;
-  emit(g, EVT.GAME_OVER, t[O.round], 0, last, NO_SEAT, 0, 0);
-  return true;
+function funded(g: G): number {
+  let k = 0;
+  for (let i = 0; i < g.t[O.numSeats]; i++) if (chips(g, i) > 0) k++;
+  return k;
 }
 
-function finishByHearts(g: G) {
+/** The game is over: the winner is the biggest profit in chips (chips − buy-ins × chips-per-buy-in). */
+function finishByProfit(g: G, early: number) {
   const t = g.t;
+  const profit = (i: number) => chips(g, i) - t[O.buyIns + i] * t[O.buyInChips];
   let best = 0;
-  for (let i = 1; i < t[O.numSeats]; i++) if (t[O.hearts + i] > t[O.hearts + best]) best = i;
+  for (let i = 1; i < t[O.numSeats]; i++) if (profit(i) > profit(best)) best = i;
   t[O.status] = TABLE_STATUS.FINISHED;
   t[O.winner] = best;
-  emit(g, EVT.GAME_OVER, t[O.round], 0, best, NO_SEAT, 1, 0);
+  emit(g, EVT.GAME_OVER, t[O.round], 0, best, NO_SEAT, early, 0);
 }

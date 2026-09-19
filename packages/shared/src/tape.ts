@@ -1,5 +1,5 @@
 import { bytesEqual, fromHex, toHex } from "./bytes";
-import { Cheat, CHEAT_INFO } from "./constants";
+import { Cheat, CHEAT_INFO, MONEY, dollars } from "./constants";
 import { envelopeHash, shellsHash } from "./hash";
 import type { Award, TapeData, TapeEnvelope, TapeRound } from "./types";
 
@@ -92,6 +92,8 @@ export function computeAwards(t: TapeData): Award[] {
   const sharp = argmax(damage);
   const slowAvg = new Map([...hesitation.entries()].map(([s, h]) => [s, h.n ? Math.round(h.total / h.n) : 0]));
   const slow = argmax(slowAvg);
+  const buyIns = new Map(t.money.results.map((r) => [r.seat, r.buyIns]));
+  const customer = argmax(buyIns, 2);
 
   const list = (xs: number[]) => xs.map(name).join(" & ");
   return [
@@ -121,7 +123,7 @@ export function computeAwards(t: TapeData): Award[] {
       emoji: "🔫",
       title: "Sharpshooter",
       seats: sharp,
-      detail: sharp.length ? `${damage.get(sharp[0])} heart(s) taken from others` : "Nobody hit anybody.",
+      detail: sharp.length ? `knocked ${damage.get(sharp[0])} chip(s) off other players` : "Nobody hit anybody.",
     },
     {
       id: "luckiest",
@@ -136,6 +138,13 @@ export function computeAwards(t: TapeData): Award[] {
       title: "Slowest Trigger",
       seats: slow,
       detail: slow.length ? `${(slowAvg.get(slow[0])! / 1000).toFixed(1)}s average before pulling` : "—",
+    },
+    {
+      id: "customer",
+      emoji: "💸",
+      title: "Best Customer",
+      seats: customer,
+      detail: customer.length ? `bought in ${buyIns.get(customer[0])} times (${dollars(buyIns.get(customer[0])! * MONEY.buyInCents)})` : "Nobody needed a second buy-in.",
     },
   ];
 }

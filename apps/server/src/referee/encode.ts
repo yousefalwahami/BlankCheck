@@ -42,9 +42,10 @@ export function tableSeed(gameId: bigint): Uint8Array {
   return seed;
 }
 
-export function encCreateTable(a: { tableIdx: number; gameId: bigint; hearts: number; wallets: Uint8Array[]; proof: Uint8Array }) {
+/** Every seat starts with one buy-in's worth of chips (the lobby buy-in already moved the money). */
+export function encCreateTable(a: { tableIdx: number; gameId: bigint; buyInChips: number; rounds: number; wallets: Uint8Array[]; proof: Uint8Array }) {
   if (a.wallets.length < 2 || a.wallets.length > MAX_SEATS) throw new Error("bad seat count");
-  const w = hdr(IX.CREATE_TABLE, a.tableIdx).u64(a.gameId).u8(a.wallets.length).u8(a.hearts);
+  const w = hdr(IX.CREATE_TABLE, a.tableIdx).u64(a.gameId).u8(a.wallets.length).u8(a.buyInChips).u8(a.rounds);
   for (const x of a.wallets) w.bytes(x, 32);
   return w.u32(a.proof.length).bytes(a.proof).done();
 }
@@ -83,4 +84,13 @@ export function encRevealShells(a: { tableIdx: number; round: number; shells: nu
   const w = hdr(IX.REVEAL_SHELLS, a.tableIdx).u8(a.round).u8(a.shells.length);
   for (const s of a.shells) w.u8(s);
   return w.bytes(a.salt, 32).done();
+}
+
+/** A broke seat buys back in. `payment` is the 64-byte signature of the $12 token transfer (zeros offline). */
+export function encBuyIn(a: { tableIdx: number; round: number; seat: number; payment: Uint8Array }) {
+  return hdr(IX.BUY_IN, a.tableIdx).u8(a.round).u8(a.seat).bytes(a.payment, 64).done();
+}
+
+export function encEndRound(a: { tableIdx: number; round: number }) {
+  return hdr(IX.END_ROUND, a.tableIdx).u8(a.round).done();
 }

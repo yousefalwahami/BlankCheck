@@ -1,14 +1,30 @@
-import { createThruClient, deriveProgramAddress, keys, type Thru } from "@thru/sdk";
-import { decodeAddress, encodeAddress, encodeSignature } from "@thru/sdk/helpers";
-import { createPasskeyChallenge, createPasskeyWallet, submitPasskeyTransaction } from "@thru/passkey/server";
-import { PASSKEY_MANAGER_PROGRAM_ADDRESS, buildAccountContext, type AccountContext } from "@thru/programs/passkey-manager";
+import { deriveProgramAddress } from "@thru/sdk";
+import { decodeAddress, decodeSignature } from "@thru/sdk/helpers";
+import { createPasskeyWallet } from "@thru/passkey/server";
+import type { AccountContext } from "@thru/programs/passkey-manager";
 import { fromHex } from "@blankcheck/shared";
 import { config } from "../config";
 import type { ChainCall } from "../engine/types";
 import {
+  CREATING_PROOF,
+  explorerAccount,
+  explorerTx,
+  forgetNonce,
+  hostAddressSync,
+  hostKey,
+  passkeyChallenge,
+  sendHostTx,
+  sendPasskeyTx,
+  thru,
+  walletContext,
+  type IndexLookup,
+} from "../thru/chain";
+import {
   encAccuse,
+  encBuyIn,
   encCommitRound,
   encCreateTable,
+  encEndRound,
   encPullTrigger,
   encResolveShot,
   encReveal,
@@ -22,92 +38,20 @@ import type { Receipt, Referee, SeatCall, SeatInfo } from "./Referee";
 /*
  * The real referee: every call is a transaction to the C program on Thru alphanet.
  *   - Host instructions are signed by the house key (fee payer + table host).
- *   - Seat instructions for passkey seats go through the passkey-manager program: the phone's
- *     Face ID signs a challenge over (wallet nonce, ordered accounts, our instruction bytes), and
- *     `validate` CPIs into the referee with the wallet authorized. The house still pays the fee.
+ *   - Seat instructions for Face ID seats go through the passkey-manager program: the phone signs a
+ *     challenge over (wallet nonce, ordered accounts, our instruction bytes), and `validate` CPIs into
+ *     the referee with the wallet authorized. The house still pays the fee.
  */
 
-const CREATING_PROOF = 1; // StateProofType.CREATING
-const SUBMISSION_ACCEPTED = 2;
-
-/** Same global queue @thru/passkey/server uses, so our txs and its txs never race on the fee payer nonce. */
-const feePayerQueues = (): Map<string, Promise<void>> => {
-  const g = globalThis as typeof globalThis & { [k: symbol]: Map<string, Promise<void>> | undefined };
-  const key = Symbol.for("thru.sharedFeePayerQueues");
-  return (g[key] ??= new Map());
-};
-
-async function withFeePayer<T>(feePayer: string, work: () => Promise<T>): Promise<T> {
-  const queues = feePayerQueues();
-  const previous = queues.get(feePayer) ?? Promise.resolve();
-  let release!: () => void;
-  const current = new Promise<void>((r) => (release = r));
-  const tail = previous.then(() => current);
-  queues.set(feePayer, tail);
-  await previous;
-  try {
-    return await work();
-  } finally {
-    release();
-    if (queues.get(feePayer) === tail) queues.delete(feePayer);
-  }
-}
-
-type HostKey = { publicKey: Uint8Array; privateKey: Uint8Array; address: string };
-
-let hostKeyPromise: Promise<HostKey> | null = null;
-let loadedHost: HostKey | null = null;
-function hostKey(): Promise<HostKey> {
-  hostKeyPromise ??= (async () => {
-    const s = config.thruHostSecret.trim();
-    if (!s) throw new Error("THRU_HOST_SECRET is not set");
-    const privateKey = /^[0-9a-fA-F]{64}$/.test(s) ? fromHex(s) : new Uint8Array(Buffer.from(s, "base64"));
-    if (privateKey.length !== 32) throw new Error("THRU_HOST_SECRET must be a 32-byte Ed25519 seed (hex or base64)");
-    const publicKey = await keys.fromPrivateKey(privateKey);
-    loadedHost = { publicKey, privateKey, address: encodeAddress(publicKey) };
-    return loadedHost;
-  })();
-  return hostKeyPromise;
-}
-
-let client: Thru | null = null;
-const thru = () => (client ??= createThruClient({ baseUrl: config.thruRpcUrl }));
-
-/** Header values that don't change per tx, cached to keep a shot's latency to one round trip. */
-const headerCache = { chainId: 0, slot: 0n, slotAt: 0, nonce: null as bigint | null };
-
-async function header(feePayer: string) {
-  const t = thru();
-  if (!headerCache.chainId) headerCache.chainId = await t.chain.getChainId();
-  if (Date.now() - headerCache.slotAt > 4000) {
-    headerCache.slot = (await t.blocks.getBlockHeight()).finalized;
-    headerCache.slotAt = Date.now();
-  }
-  if (headerCache.nonce === null) {
-    const acct = await t.accounts.get(feePayer);
-    headerCache.nonce = acct.meta?.nonce ?? 0n;
-  }
-  return {
-    fee: 0n,
-    nonce: headerCache.nonce,
-    startSlot: headerCache.slot,
-    chainId: headerCache.chainId,
-    expiryAfter: 100,
-    computeUnits: config.txComputeUnits,
-    stateUnits: config.txStateUnits,
-    memoryUnits: config.txMemoryUnits,
-  };
-}
+const describe = (code: bigint) => ERR_NAMES[Number(code)] ?? `0x${code.toString(16)}`;
 
 export class ThruReferee implements Referee {
   readonly mode = "thru" as const;
   private table: { gameId: bigint; address: string; bytes: Uint8Array; wallets: string[] } | null = null;
   private readonly program = config.refereeProgramAddress;
-  private readonly passkeyProgram = config.passkeyManagerProgramAddress || PASSKEY_MANAGER_PROGRAM_ADDRESS;
 
   constructor() {
     if (!this.program) throw new Error("REFEREE_PROGRAM_ADDRESS is not set");
-    void hostKey();
   }
 
   /** Call once at boot: fails fast on a bad key / RPC so we can fall back to the mock. */
@@ -118,8 +62,7 @@ export class ThruReferee implements Referee {
   }
 
   hostAddress(): string {
-    if (!loadedHost) throw new Error("host key not loaded yet (call ThruReferee.check() at boot)");
-    return loadedHost.address;
+    return hostAddressSync();
   }
 
   async prepareTable(gameId: bigint) {
@@ -127,31 +70,53 @@ export class ThruReferee implements Referee {
     return { address, key: bytes };
   }
 
-  async createTable(g: { gameId: bigint; wallets: string[]; hearts: number }): Promise<Receipt> {
+  async createTable(g: { gameId: bigint; wallets: string[]; buyInChips: number; rounds: number }): Promise<Receipt> {
     const { address, key } = await this.prepareTable(g.gameId);
     this.table = { gameId: g.gameId, address, bytes: key, wallets: g.wallets };
-    return this.hostTx("CREATE_TABLE", async () => {
-      const proof = await thru().proofs.generate({ address, proofType: CREATING_PROOF });
-      return (ctx) =>
-        encCreateTable({ tableIdx: ctx.getAccountIndex(address), gameId: g.gameId, hearts: g.hearts, wallets: g.wallets.map(decodeAddress), proof: proof.proof });
-    }, [address]);
+    const proof = await thru()
+      .proofs.generate({ address, proofType: CREATING_PROOF })
+      .catch(() => null);
+    if (!proof) return { kind: "CREATE_TABLE", ms: 0, ok: false, mock: false, signer: "host", error: "couldn't get a creating state proof", retryable: true };
+    return this.host("CREATE_TABLE", (ctx) =>
+      encCreateTable({
+        tableIdx: ctx.getAccountIndex(address),
+        gameId: g.gameId,
+        buyInChips: g.buyInChips,
+        rounds: g.rounds,
+        wallets: g.wallets.map(decodeAddress),
+        proof: proof.proof,
+      }),
+    );
   }
 
   async run(call: ChainCall): Promise<Receipt> {
     const t = this.table;
     if (!t) return { kind: call.kind, ms: 0, ok: false, mock: false, signer: "host", error: "no table" };
-    const at = (ctx: { getAccountIndex: (p: string) => number }) => ({ tableIdx: ctx.getAccountIndex(t.address) });
+    const at = (ctx: IndexLookup) => ({ tableIdx: ctx.getAccountIndex(t.address) });
     switch (call.kind) {
       case "commitRound":
-        return this.hostTx("COMMIT_ROUND", async () => (ctx) => encCommitRound({ ...at(ctx), ...call }), [t.address]);
+        return this.host("COMMIT_ROUND", (ctx) => encCommitRound({ ...at(ctx), ...call }));
       case "resolveShot":
-        return this.hostTx("RESOLVE_SHOT", async () => (ctx) => encResolveShot({ ...at(ctx), ...call }), [t.address]);
+        return this.host("RESOLVE_SHOT", (ctx) => encResolveShot({ ...at(ctx), ...call }));
       case "seal":
-        return this.hostTx("SEAL", async () => (ctx) => encSeal({ ...at(ctx), ...call }), [t.address]);
+        return this.host("SEAL", (ctx) => encSeal({ ...at(ctx), ...call }));
       case "reveal":
-        return this.hostTx(call.mode === 0 ? "REVEAL" : "REVEAL_TAPE", async () => (ctx) => encReveal({ ...at(ctx), ...call }), [t.address]);
+        return this.host(call.mode === 0 ? "REVEAL" : "REVEAL_TAPE", (ctx) => encReveal({ ...at(ctx), ...call }));
       case "revealShells":
-        return this.hostTx("REVEAL_SHELLS", async () => (ctx) => encRevealShells({ ...at(ctx), ...call }), [t.address]);
+        return this.host("REVEAL_SHELLS", (ctx) => encRevealShells({ ...at(ctx), ...call }));
+      case "buyIn": {
+        const payment = new Uint8Array(64);
+        if (call.paymentTx) {
+          try {
+            payment.set(decodeSignature(call.paymentTx).subarray(0, 64));
+          } catch {
+            /* not a Thru signature (offline bank): leave zeros */
+          }
+        }
+        return this.host("BUY_IN", (ctx) => encBuyIn({ ...at(ctx), round: call.round, seat: call.seat, payment }));
+      }
+      case "endRound":
+        return this.host("END_ROUND", (ctx) => encEndRound({ ...at(ctx), round: call.round }));
       case "pullTrigger":
       case "accuse":
         return this.seatTx(call);
@@ -159,18 +124,10 @@ export class ThruReferee implements Referee {
   }
 
   async challengeFor(call: SeatCall, seat: SeatInfo) {
-    const t = this.table;
-    if (!t) throw new Error("no table yet");
-    const host = await hostKey();
-    const accountCtx = this.walletContext(seat.wallet, host.address);
+    if (!this.table) throw new Error("no table yet");
+    const accountCtx = this.seatContext(seat.wallet);
     const instructionData = this.seatInstruction(call, accountCtx, seat.wallet);
-    const { challenge } = await createPasskeyChallenge({
-      client: thru() as never,
-      walletAddress: seat.wallet,
-      accountCtx,
-      targetProgramAddress: this.program,
-      instructionData,
-    });
+    const challenge = await passkeyChallenge({ wallet: seat.wallet, accountCtx, targetProgram: this.program, instructionData });
     return { challenge, prepared: { accountCtx, instructionData, wallet: seat.wallet } };
   }
 
@@ -178,6 +135,7 @@ export class ThruReferee implements Referee {
     const host = await hostKey();
     const pk = fromHex(publicKeyHex);
     const t0 = performance.now();
+    // createPasskeyWallet serializes on the shared fee-payer queue itself.
     const { walletAddress } = await createPasskeyWallet({
       client: thru() as never,
       adminPublicKey: host.publicKey,
@@ -187,30 +145,27 @@ export class ThruReferee implements Referee {
       pubkeyY: pk.slice(32, 64),
       walletName: "blank-check",
     });
-    headerCache.nonce = null; // the helper used the fee payer nonce
+    forgetNonce();
     void credentialId;
     return { wallet: walletAddress, receipt: { kind: "WALLET", ms: Math.round(performance.now() - t0), ok: true, mock: false, signer: "host" as const } };
   }
 
   explorerTxUrl(signature: string) {
-    return `${config.explorerUrl}/tx/${signature}`;
+    return explorerTx(signature);
   }
 
   explorerAccountUrl(address: string) {
-    return `${config.explorerUrl}/address/${address}`;
+    return explorerAccount(address);
   }
 
   /* ───────────── internals ───────────── */
 
-  private walletContext(wallet: string, feePayer: string): AccountContext {
-    const t = this.table!;
-    return buildAccountContext({
-      walletAddress: wallet,
-      readWriteAccounts: [t.bytes],
-      readOnlyAccounts: [decodeAddress(this.program)],
-      feePayerAddress: feePayer,
-      programAddress: this.passkeyProgram,
-    });
+  private host(kind: string, build: (ctx: IndexLookup) => Uint8Array, signer: Receipt["signer"] = "host") {
+    return sendHostTx({ kind, program: this.program, readWrite: [this.table!.address], build, signer, describe });
+  }
+
+  private seatContext(wallet: string): AccountContext {
+    return walletContext(wallet, [this.table!.bytes], [decodeAddress(this.program)]);
   }
 
   private seatInstruction(call: SeatCall, ctx: AccountContext, wallet: string): Uint8Array {
@@ -223,20 +178,18 @@ export class ThruReferee implements Referee {
 
   private async seatTx(call: SeatCall): Promise<Receipt> {
     const t = this.table!;
-    const host = await hostKey();
     const seat = call.kind === "pullTrigger" ? call.shooter : call.accuser;
     const wallet = t.wallets[seat];
     const kind = call.kind === "pullTrigger" ? "PULL_TRIGGER" : "ACCUSE";
 
-    // Bots and host-signed seats: the house key is the seat wallet (fee payer = index 0).
-    if (!wallet || wallet === host.address) {
-      return this.hostTx(
+    // Bots and house-signed seats: the house key is the seat wallet (fee payer = index 0).
+    if (!wallet || wallet === hostAddressSync()) {
+      return this.host(
         kind,
-        async () => (ctx) =>
+        (ctx) =>
           call.kind === "pullTrigger"
             ? encPullTrigger({ tableIdx: ctx.getAccountIndex(t.address), walletIdx: 0, round: call.round, shot: call.shot, shooter: call.shooter, target: call.target })
             : encAccuse({ tableIdx: ctx.getAccountIndex(t.address), walletIdx: 0, round: call.round, accuser: call.accuser, accused: call.accused }),
-        [t.address],
         "house",
       );
     }
@@ -244,99 +197,14 @@ export class ThruReferee implements Referee {
     if (call.auth.type !== "passkey") return { kind, ms: 0, ok: false, mock: false, signer: "passkey", error: "Face ID signature missing", retryable: false };
     const prep = call.auth.prepared as { accountCtx: AccountContext; instructionData: Uint8Array } | undefined;
     if (!prep) return { kind, ms: 0, ok: false, mock: false, signer: "passkey", error: "no prepared challenge", retryable: false };
-    const a = call.auth.assertion;
-
-    return withFeePayer(host.address, async () => {
-      const t0 = performance.now();
-      try {
-        const res = await submitPasskeyTransaction({
-          client: thru() as never,
-          adminPublicKey: host.publicKey,
-          adminPrivateKey: host.privateKey,
-          walletAddress: wallet,
-          accountCtx: prep.accountCtx,
-          targetProgramAddress: this.program,
-          instructionData: prep.instructionData,
-          signatureR: a.signatureR,
-          signatureS: a.signatureS,
-          authenticatorData: a.authenticatorData,
-          clientDataJSON: a.clientDataJSON,
-        });
-        headerCache.nonce = null;
-        const ok = res.status === "finalized";
-        return {
-          kind,
-          ms: Math.round(performance.now() - t0),
-          ok,
-          mock: false,
-          signer: "passkey",
-          signature: res.signature,
-          explorerUrl: this.explorerTxUrl(res.signature),
-          error: ok ? undefined : `${res.status}${res.errorCode !== undefined ? ` (${describeCode(res.errorCode)})` : ""}`,
-          retryable: false,
-        };
-      } catch (e) {
-        headerCache.nonce = null;
-        return { kind, ms: Math.round(performance.now() - t0), ok: false, mock: false, signer: "passkey", error: (e as Error).message, retryable: false };
-      }
+    return sendPasskeyTx({
+      kind,
+      wallet,
+      accountCtx: prep.accountCtx,
+      targetProgram: this.program,
+      instructionData: prep.instructionData,
+      assertion: call.auth.assertion,
+      describe,
     });
   }
-
-  /** Build, sign (house key), send, and wait for execution. Measured submit → executed. */
-  private async hostTx(
-    kind: string,
-    prepare: () => Promise<(ctx: { getAccountIndex: (p: string) => number }) => Uint8Array>,
-    readWrite: string[],
-    signer: Receipt["signer"] = "host",
-  ): Promise<Receipt> {
-    const host = await hostKey();
-    return withFeePayer(host.address, async () => {
-      let t0 = performance.now();
-      try {
-        const buildIx = await prepare();
-        const h = await header(host.address);
-        const signed = await thru().transactions.buildAndSign({
-          feePayer: { publicKey: host.publicKey, privateKey: host.privateKey },
-          program: this.program,
-          header: h,
-          accounts: { readWrite },
-          instructionData: async (ctx) => buildIx({ getAccountIndex: (p) => ctx.getAccountIndex(p) }),
-        });
-        t0 = performance.now();
-        let signature = encodeSignature(signed.rawTransaction.slice(signed.rawTransaction.length - 64));
-        let accepted = false;
-        for await (const u of thru().transactions.sendAndTrack(signed.rawTransaction, { timeoutMs: 15_000 })) {
-          if (u.signature?.value) signature = encodeSignature(u.signature.value);
-          if (u.status === SUBMISSION_ACCEPTED) accepted = true;
-          if (u.executionResult) {
-            const r = u.executionResult;
-            if (r.feePayerExpectedNonce !== undefined) headerCache.nonce = r.feePayerExpectedNonce;
-            else headerCache.nonce = h.nonce + 1n;
-            const ok = r.vmError === 0 && r.userErrorCode === 0n;
-            return {
-              kind,
-              ms: Math.round(performance.now() - t0),
-              ok,
-              mock: false,
-              signer,
-              signature,
-              explorerUrl: this.explorerTxUrl(signature),
-              error: ok ? undefined : r.vmError ? `vm error ${r.vmError}` : `reverted: ${describeCode(r.userErrorCode)}`,
-              retryable: r.feePayerExpectedNonce !== undefined,
-            };
-          }
-        }
-        headerCache.nonce = null;
-        return { kind, ms: Math.round(performance.now() - t0), ok: false, mock: false, signer, signature, error: accepted ? "timed out waiting for execution" : "not accepted", retryable: !accepted };
-      } catch (e) {
-        headerCache.nonce = null;
-        return { kind, ms: Math.round(performance.now() - t0), ok: false, mock: false, signer, error: (e as Error).message, retryable: true };
-      }
-    });
-  }
-}
-
-function describeCode(code: bigint | number): string {
-  const n = Number(code);
-  return ERR_NAMES[n] ?? `0x${n.toString(16)}`;
 }

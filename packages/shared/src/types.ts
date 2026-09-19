@@ -8,6 +8,10 @@ export type Phase =
   | "RESOLVING"
   | "RIGGED"
   | "LAST_CALL"
+  /** The round is over: the pot goes to the chip leader. */
+  | "ROUND_END"
+  /** Between rounds: fewer than two players have chips, so broke players get a window to buy back in. */
+  | "BUY_INS"
   | "TAPE"
   | "OVER";
 
@@ -21,11 +25,29 @@ export type Seat = {
   /** Passkey wallet address (humans) or host address (bots). Empty until bound. */
   wallet: string;
   walletReady: boolean;
-  hearts: number;
+  /** Chips on the table. 0 = broke: skipped and untargetable until they buy back in. */
+  chips: number;
+  /** $12 buy-ins so far (the first one happens in the lobby). */
+  buyIns: number;
+  /** Fake dollars left in their wallet, in cents. null until the wallet is opened. */
+  bankrollCents: number | null;
+  /** Broke and can't afford another buy-in: out for good. */
+  cleanedOut: boolean;
   connected: boolean;
 };
 
-export type PublicEventKind = "round" | "shot" | "rigged" | "verdict" | "elim" | "mismatch" | "join" | "info" | "win" | "taunt";
+export type PublicEventKind =
+  | "round"
+  | "shot"
+  | "rigged"
+  | "verdict"
+  | "elim"
+  | "mismatch"
+  | "join"
+  | "info"
+  | "win"
+  | "taunt"
+  | "money";
 
 export type PublicEvent = {
   id: number;
@@ -45,12 +67,24 @@ export type RiggedState = {
   verdict: Verdict | null;
   /** Filled in once the envelopes are opened. Only the accused's envelopes, only this round. */
   evidence: EvidenceItem[] | null;
+  /** Chips that changed hands (guilty: all of the cheater's; innocent: 1). */
+  chipsMoved: number | null;
   txUrl?: string;
 };
 
 export type GameConfig = {
-  hearts: number;
+  /** Rounds in a game; afterwards everyone cashes out. */
+  rounds: number;
   faceIdOnTrigger: boolean;
+};
+
+export type CashOutResult = {
+  seat: number;
+  chips: number;
+  buyIns: number;
+  spentCents: number;
+  cashOutCents: number;
+  profitCents: number;
 };
 
 /** Everything the TV and every phone may see. Never contains secrets. */
@@ -65,14 +99,19 @@ export type PublicState = {
   fired: { live: number; blank: number };
   shellsLeft: number;
   countIsOff: boolean;
+  /** Chips knocked off by live shells this round; the chip leader takes it at round end. */
+  pot: number;
   busted: number[];
   accuseUsed: number[];
   rigged: RiggedState | null;
   lastCallEndsAt: number | null;
+  buyInsEndAt: number | null;
   turnStartedAt: number | null;
   winner: number | null;
+  results: CashOutResult[] | null;
   config: GameConfig;
   refereeMode: RefereeMode;
+  bankMode: RefereeMode;
   tableAddress: string | null;
   explorerUrl: string;
   log: PublicEvent[];
@@ -81,7 +120,7 @@ export type PublicState = {
 
 export type Challenge = {
   id: string;
-  kind: "trigger" | "accuse";
+  kind: "trigger" | "accuse" | "buyin";
   /** base64url challenge for WebAuthn. */
   challenge: string;
   target?: number;
@@ -100,6 +139,8 @@ export type PrivateView = {
   challenge: Challenge | null;
   canCheat: boolean;
   canAccuse: boolean;
+  /** You're at 0 chips (or haven't bought in yet) and can afford the $12. */
+  canBuyIn: boolean;
   credentialId: string | null;
 };
 
@@ -111,22 +152,40 @@ export type PasskeyAssertion = {
 };
 
 export type Fx =
-  | { type: "round"; round: number; live: number; blank: number }
+  | { type: "round"; round: number; rounds: number; live: number; blank: number }
   | {
       type: "shot";
       shooter: number;
       target: number;
       live: boolean;
-      heartsLeft: number;
-      eliminated: boolean;
+      /** The target's chips after the shot. */
+      chipsLeft: number;
+      /** A live hit took their last chip. */
+      broke: boolean;
+      pot: number;
       again: boolean;
     }
   | { type: "mismatch"; which: "live" | "blank" }
   | { type: "rigged"; accuser: number; accused: number }
-  | { type: "verdict"; accuser: number; accused: number; verdict: Verdict; evidence: EvidenceItem[]; loser: number; eliminated: boolean }
+  | {
+      type: "verdict";
+      accuser: number;
+      accused: number;
+      verdict: Verdict;
+      evidence: EvidenceItem[];
+      /** Who paid whom, and how many chips. */
+      from: number;
+      to: number;
+      chips: number;
+      broke: boolean;
+    }
   | { type: "lastCall"; endsAt: number }
+  | { type: "potAward"; round: number; winners: number[]; chipsEach: number; carried: number }
+  | { type: "buyIn"; seat: number; chips: number; cents: number }
+  | { type: "broke"; seat: number; cleanedOut: boolean }
+  | { type: "buyInWindow"; endsAt: number }
   | { type: "taunt"; seat: number; taunt: TauntId; text: string }
-  | { type: "gameOver"; winner: number }
+  | { type: "gameOver"; winner: number; results: CashOutResult[] }
   | { type: "tape"; tape: TapeData }
   | { type: "boo"; seat: number };
 
@@ -186,6 +245,7 @@ export type TapeAccusation = {
   accused: number;
   verdict: Verdict;
   window: number;
+  chipsMoved: number;
   tx?: string;
 };
 
@@ -202,6 +262,17 @@ export type TapeRound = {
   shots: TapeShot[];
   envelopes: TapeEnvelope[];
   accusations: TapeAccusation[];
+  /** Buy-backs during (or right after) this round. The lobby buy-in isn't tied to a round. */
+  buyIns: { seat: number; tx?: string }[];
+  pot: { winners: number[]; chipsEach: number; carried: number; tx?: string } | null;
+};
+
+export type TapeMoney = {
+  ticker: string;
+  bankMode: RefereeMode;
+  results: CashOutResult[];
+  /** Every dollar movement, with its token-transfer signature when on Thru. */
+  transfers: { seat: number; kind: "buyIn" | "cashOut"; cents: number; tx?: string; ok: boolean }[];
 };
 
 export type TapeData = {
@@ -214,12 +285,13 @@ export type TapeData = {
   seats: { seat: number; name: string; kind: "human" | "bot"; personality?: BotId }[];
   winner: number;
   rounds: TapeRound[];
+  money: TapeMoney;
   onChainActions: number;
   failedTxs: number;
 };
 
 export type Award = {
-  id: "liar" | "accuser" | "honest" | "sharpshooter" | "luckiest" | "slowest";
+  id: "liar" | "accuser" | "honest" | "sharpshooter" | "luckiest" | "slowest" | "customer";
   emoji: string;
   title: string;
   /** Winners (ties share an award). Empty when nobody qualifies. */
