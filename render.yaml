@@ -1,0 +1,23 @@
+# Render blueprint for the game server (always-on WebSockets). The web app goes on Vercel.
+services:
+  - type: web
+    name: blank-check-server
+    runtime: docker
+    dockerfilePath: ./apps/server/Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    envVars:
+      - key: REFEREE_MODE
+        value: mock
+      - key: WAIT_FOR_CHAIN
+        value: "true"
+      - key: CORS_ORIGINS
+        value: "*"
+      - key: THRU_RPC_URL
+        value: https://rpc.alphanet.thru.org
+      - key: THRU_HOST_SECRET
+        sync: false
+      - key: REFEREE_PROGRAM_ADDRESS
+        sync: false
+      - key: TYPESAFE_API_KEY
+        sync: false

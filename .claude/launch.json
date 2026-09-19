@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "game-server",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "@blankcheck/server", "dev"],
+      "port": 4000
+    },
+    {
+      "name": "web",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "@blankcheck/web", "dev"],
+      "port": 3000
+    }
+  ]
+}
