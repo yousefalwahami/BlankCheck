@@ -26,7 +26,7 @@ export default function Home() {
         </Link>
       </div>
       <p className="max-w-lg font-crt text-lg leading-snug text-ash">
-        Face ID pulls the trigger. Every shot, sealed envelope and accusation is a transaction on Thru, refereed by a program written in C.
+        Buy in for $12, play for chips, cash out the rest. Face ID pulls the trigger and pays the buy-in; every shot, sealed envelope, accusation and payout is a transaction on Thru, refereed by a program written in C.
       </p>
     </main>
   );

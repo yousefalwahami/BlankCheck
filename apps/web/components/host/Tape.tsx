@@ -3,6 +3,8 @@
 import {
   CHEAT_INFO,
   Cheat,
+  MONEY,
+  dollars,
   computeAwards,
   replayRound,
   verifyTapeEnvelope,
@@ -16,17 +18,18 @@ import { AnimatePresence, motion } from "motion/react";
 import { QRCodeSVG } from "qrcode.react";
 import { useEffect, useMemo, useState } from "react";
 import { sfx } from "@/lib/sounds";
-import { Avatar, Shell, shortAddr } from "../ui/bits";
+import { Avatar, ChipIcon, Profit, Shell, shortAddr } from "../ui/bits";
 import { useChainCheck } from "./useChainCheck";
 
 type Slide =
   | { kind: "intro" }
   | { kind: "round"; round: TapeRound }
   | { kind: "cheat"; round: TapeRound; env: TapeEnvelope }
+  | { kind: "money" }
   | { kind: "awards" }
   | { kind: "final" };
 
-const DURATION: Record<Slide["kind"], number> = { intro: 4000, round: 5000, cheat: 4500, awards: 11000, final: 0 };
+const DURATION: Record<Slide["kind"], number> = { intro: 4000, round: 5500, cheat: 4500, money: 8000, awards: 12000, final: 0 };
 
 export function TapeView({ tape, state, onRestart }: { tape: TapeData; state: PublicState; onRestart: () => void }) {
   const chain = useChainCheck(tape);
@@ -50,7 +53,7 @@ export function TapeView({ tape, state, onRestart }: { tape: TapeData; state: Pu
       out.push({ kind: "round", round: r });
       for (const e of r.envelopes) if (e.cheat !== Cheat.NONE) out.push({ kind: "cheat", round: r, env: e });
     }
-    out.push({ kind: "awards" }, { kind: "final" });
+    out.push({ kind: "money" }, { kind: "awards" }, { kind: "final" });
     return out;
   }, [tape]);
 
@@ -120,12 +123,16 @@ export function TapeView({ tape, state, onRestart }: { tape: TapeData; state: Pu
               </div>
             )}
 
-            {slide.kind === "round" && <RoundSlide r={slide.round} name={name} verified={verified.shells.get(slide.round.round)!} replayOk={verified.replay.get(slide.round.round)!} link={tx(slide.round.revealShellsTx)} />}
+            {slide.kind === "round" && (
+              <RoundSlide r={slide.round} name={name} verified={verified.shells.get(slide.round.round)!} replayOk={verified.replay.get(slide.round.round)!} link={tx(slide.round.revealShellsTx)} tx={tx} />
+            )}
+
+            {slide.kind === "money" && <MoneySlide tape={tape} name={name} seat={seat} />}
 
             {slide.kind === "cheat" && (
               <div className="flex items-center justify-center gap-[5vw]">
                 <div className="flex flex-col items-center gap-3">
-                  <Avatar seat={{ seat: slide.env.seat, name: name(slide.env.seat), kind: seat(slide.env.seat)?.kind ?? "human", personality: seat(slide.env.seat)?.personality, hearts: 1 }} size={200} />
+                  <Avatar seat={{ seat: slide.env.seat, name: name(slide.env.seat), kind: seat(slide.env.seat)?.kind ?? "human", personality: seat(slide.env.seat)?.personality }} size={200} />
                   <p className="font-display text-[6vh]">{name(slide.env.seat)}</p>
                 </div>
                 <div className="flex flex-col items-start gap-[2vh]">
@@ -200,7 +207,21 @@ export function TapeView({ tape, state, onRestart }: { tape: TapeData; state: Pu
   );
 }
 
-function RoundSlide({ r, name, verified, replayOk, link }: { r: TapeRound; name: (n: number) => string; verified: boolean; replayOk: boolean; link?: string }) {
+function RoundSlide({
+  r,
+  name,
+  verified,
+  replayOk,
+  link,
+  tx,
+}: {
+  r: TapeRound;
+  name: (n: number) => string;
+  verified: boolean;
+  replayOk: boolean;
+  link?: string;
+  tx: (sig?: string) => string | undefined;
+}) {
   const firedAt = new Map(r.shots.map((s) => [s.shellIndex, s]));
   const cheated = r.envelopes.filter((e) => e.cheat !== Cheat.NONE);
   return (
@@ -230,7 +251,92 @@ function RoundSlide({ r, name, verified, replayOk, link }: { r: TapeRound; name:
       <p className="font-type text-[3vh]">
         {cheated.length === 0 ? "Nobody cheated this round. Allegedly." : `${cheated.length} cheat${cheated.length > 1 ? "s" : ""}: ${cheated.map((e) => `${name(e.seat)} (${CHEAT_INFO[e.cheat].name})`).join(", ")}`}
       </p>
+      <div className="flex flex-wrap items-center justify-center gap-x-[2vw] gap-y-1 font-crt text-[2.6vh]">
+        {r.pot && (
+          <span className="text-brass">
+            🏦 pot {r.pot.winners.length ? `${r.pot.chipsEach * r.pot.winners.length} → ${r.pot.winners.map(name).join(" & ")}` : "empty"}
+            {r.pot.carried > 0 ? ` · ${r.pot.carried} carried` : ""}
+            {tx(r.pot.tx) && (
+              <a href={tx(r.pot.tx)} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} className="ml-2 underline">
+                settled ↗
+              </a>
+            )}
+          </span>
+        )}
+        {r.accusations.map((a, i) => (
+          <span key={i} className={a.verdict === "GUILTY" ? "text-blood" : "text-crt"}>
+            🚨 {name(a.accuser)} → {name(a.accused)}: {a.verdict} ({a.chipsMoved} chip{a.chipsMoved === 1 ? "" : "s"})
+          </span>
+        ))}
+        {r.buyIns.map((b, i) => (
+          <span key={`b${i}`} className="text-crt">
+            💵 {name(b.seat)} bought back in
+            {tx(b.tx) && (
+              <a href={tx(b.tx)} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} className="ml-2 underline">
+                ↗
+              </a>
+            )}
+          </span>
+        ))}
+      </div>
       <Verified ok={verified && replayOk && r.shellsOk !== false} detail={replayOk ? "sealed order + revealed cheats reproduce every shot" : "shots don't match the sealed order!"} links={[["revealed", link]]} />
+    </div>
+  );
+}
+
+function MoneySlide({ tape, name, seat }: { tape: TapeData; name: (n: number) => string; seat: (n: number) => TapeData["seats"][number] | undefined }) {
+  const m = tape.money;
+  const ranked = [...m.results].sort((a, b) => b.profitCents - a.profitCents || a.seat - b.seat);
+  const moneyTx = (sig?: string) => (sig && m.bankMode === "thru" ? `${tape.explorerUrl}/tx/${sig}` : undefined);
+  const spent = m.results.reduce((a, r) => a + r.spentCents, 0);
+  const paid = m.results.reduce((a, r) => a + r.cashOutCents, 0);
+  return (
+    <div className="flex flex-col items-center gap-[2.5vh]">
+      <h3 className="font-display text-[9vh] leading-none vhs-text">THE BOOKS</h3>
+      <p className="font-crt text-[2.6vh] text-ash">
+        {dollars(spent)} bought in · {dollars(paid)} cashed out · every dollar is a {m.ticker} {m.bankMode === "thru" ? "token transfer on Thru" : "transfer in the mock bank"}
+      </p>
+      <div className="grid w-full max-w-[80vw] gap-[1.2vh]">
+        {ranked.map((r, i) => {
+          const s = seat(r.seat);
+          const mine = m.transfers.filter((t) => t.seat === r.seat);
+          return (
+            <motion.div
+              key={r.seat}
+              initial={{ opacity: 0, x: -40 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: 0.2 + i * 0.2 }}
+              className="flex items-center gap-[1.5vw] rounded-2xl border border-bone/15 bg-black/60 px-[1.5vw] py-[1vh]"
+            >
+              {s && <Avatar seat={s} size={56} />}
+              <p className="w-[16vw] truncate font-display text-[4vh]">{name(r.seat)}</p>
+              <p className="flex items-center gap-2 font-crt text-[3vh]">
+                <ChipIcon size={28} color="#e8b13a" /> {r.chips}
+              </p>
+              <p className="font-crt text-[2.6vh] text-ash">
+                in {dollars(r.spentCents)} ({r.buyIns}× {dollars(MONEY.buyInCents)}) · out {dollars(r.cashOutCents)}
+              </p>
+              <div className="ml-auto flex items-center gap-3">
+                <div className="flex gap-2 font-crt text-[2vh]">
+                  {mine.map((t, j) =>
+                    moneyTx(t.tx) ? (
+                      <a key={j} href={moneyTx(t.tx)} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} className={`underline ${t.ok ? "text-crt" : "text-blood"}`}>
+                        {t.kind === "buyIn" ? "in" : "out"}↗
+                      </a>
+                    ) : (
+                      <span key={j} className={t.ok ? "text-crt/60" : "text-blood"}>
+                        {t.kind === "buyIn" ? "in" : "out"}
+                        {t.ok ? "✓" : "✖"}
+                      </span>
+                    ),
+                  )}
+                </div>
+                <Profit cents={r.profitCents} className="font-display text-[4.5vh]" />
+              </div>
+            </motion.div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -273,7 +379,7 @@ function Awards({ tape, name, seat }: { tape: TapeData; name: (n: number) => str
             </div>
             {a.seats.length === 1 && seat(a.seats[0]) && (
               <div className="ml-auto">
-                <Avatar seat={{ ...seat(a.seats[0])!, hearts: 1 }} size={64} />
+                <Avatar seat={seat(a.seats[0])!} size={64} />
               </div>
             )}
           </motion.div>

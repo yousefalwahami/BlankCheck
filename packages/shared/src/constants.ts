@@ -99,7 +99,8 @@ export const TIMING = {
   peekVisible: 2000,
   botThinkMin: 1100,
   botThinkMax: 2200,
-  gameOverToTape: 2500,
+  /** Long enough to read the cash-out table before the tape rolls. */
+  gameOverToTape: 7000,
   potAward: 2600,
   /** Between rounds, how long to wait for broke players to buy back in. */
   buyInWindow: 20000,
