@@ -1,0 +1,18 @@
+{
+  "name": "blank-check",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Everyone cheats. The chain remembers. A party game with a C referee on Thru.",
+  "packageManager": "pnpm@9.15.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "pnpm -r --parallel --filter @blankcheck/server --filter @blankcheck/web dev",
+    "dev:server": "pnpm --filter @blankcheck/server dev",
+    "dev:web": "pnpm --filter @blankcheck/web dev",
+    "build": "pnpm -r build",
+    "test": "pnpm -r test",
+    "typecheck": "pnpm -r typecheck"
+  }
+}
