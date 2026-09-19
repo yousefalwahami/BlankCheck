@@ -363,7 +363,8 @@ export class Room {
         const p = this.enqueueChain(e.tag, e.call);
         if (e.then) {
           const then = e.then;
-          Promise.all([config.waitForChain ? p : Promise.resolve(), sleep(e.minMs ?? 0)]).then(() => {
+          const chainDone = config.waitForChain ? Promise.race([p, new Promise((r) => setTimeout(r, config.chainWaitCapMs))]) : Promise.resolve();
+          Promise.all([chainDone, sleep(e.minMs ?? 0)]).then(() => {
             if (gen === this.generation) this.dispatch(then);
           });
         }

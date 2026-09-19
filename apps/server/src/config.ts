@@ -11,6 +11,8 @@ export const config = {
     .filter(Boolean),
   refereeMode: (env.REFEREE_MODE === "thru" ? "thru" : "mock") as "mock" | "thru",
   waitForChain: bool(env.WAIT_FOR_CHAIN, true),
+  /** Even when waiting for the chain, never hold the table longer than this for one confirmation. */
+  chainWaitCapMs: Number(env.CHAIN_WAIT_CAP_MS ?? 4000),
   thruRpcUrl: env.THRU_RPC_URL ?? "https://rpc.alphanet.thru.org",
   explorerUrl: (env.EXPLORER_URL ?? "https://scan.thru.org").replace(/\/$/, ""),
   thruHostSecret: env.THRU_HOST_SECRET ?? "",
