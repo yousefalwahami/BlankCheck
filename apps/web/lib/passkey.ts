@@ -49,7 +49,7 @@ export function forgetPasskey() {
 /** First sit-down: Face ID creates the passkey (and, server-side, the on-chain wallet). */
 export async function createPasskey(name: string): Promise<StoredPasskey> {
   const userId = `bc-${crypto.randomUUID()}`;
-  const r = await registerPasskey(`${name} · Blank Check`, userId, location.hostname);
+  const r = await registerPasskey(`${name} · Gambit Rodeo`, userId, location.hostname);
   const stored = { credentialId: r.credentialId, publicKey: (r.publicKeyX + r.publicKeyY).toLowerCase(), name };
   savePasskey(stored);
   return stored;

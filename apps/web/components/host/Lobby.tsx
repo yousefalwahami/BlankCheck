@@ -3,7 +3,7 @@
 import { BOTS, BOT_IDS, DEFAULT_ROUNDS, DEMO_ROUNDS, MAX_SEATS, MONEY, dollars, type BotId, type PublicState } from "@blankcheck/shared";
 import { AnimatePresence, motion } from "motion/react";
 import { QRCodeSVG } from "qrcode.react";
-import { Avatar, Chips } from "../ui/bits";
+import { Avatar, Chips, GameTitle } from "../ui/bits";
 
 export function Lobby(props: {
   state: PublicState;
@@ -22,8 +22,8 @@ export function Lobby(props: {
   return (
     <div className="grid h-full grid-cols-1 gap-[3vw] p-[3vw] lg:grid-cols-[minmax(0,5fr)_minmax(0,6fr)]">
       <section className="flex flex-col items-center justify-center gap-[2vh] text-center">
-        <h1 className="animate-flicker font-display text-[9vh] leading-none">
-          BLANK <span className="text-blood">CHECK</span>
+        <h1 className="font-display text-[9vh] leading-none">
+          <GameTitle />
         </h1>
         <p className="font-type text-[2.4vh] text-bone/70">Everyone cheats. The chain remembers.</p>
         <p className="font-crt text-[2.4vh] text-brass">
@@ -124,7 +124,7 @@ export function Lobby(props: {
               checked={state.config.faceIdOnTrigger}
               onChange={(e) => props.onConfig({ faceIdOnTrigger: e.target.checked })}
             />
-            Face ID on trigger
+            Face ID on pop
           </label>
         </div>
 

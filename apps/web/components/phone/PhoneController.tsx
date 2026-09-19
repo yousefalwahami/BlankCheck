@@ -417,15 +417,15 @@ export function PhoneController({ room }: { room: string }) {
         {funded && myTurn && state.phase === "AWAIT_AIM" && (
           <>
             <p className="font-display text-5xl text-blood">YOUR TURN</p>
-            <p className="font-crt text-xl text-ash">Who gets the chambered shell?</p>
+            <p className="font-crt text-xl text-ash">Who gets popped?</p>
             <div className="grid w-full grid-cols-2 gap-3">
               <button onClick={() => aim(me.seat)} className="col-span-2 rounded-2xl border-2 border-brass bg-brass/10 py-4 font-display text-3xl tracking-wide">
-                🫵 YOU <span className="block font-crt text-base text-ash">blank = shoot again</span>
+                🫵 YOU <span className="block font-crt text-base text-ash">blank = pop again</span>
               </button>
               {playing
                 .filter((s) => s.seat !== me.seat)
                 .map((s) => (
-                  <button key={s.seat} onClick={() => aim(s.seat)} aria-label={`Shoot ${s.name}`} className="flex items-center gap-2 rounded-2xl border-2 border-bone/15 bg-soot p-3 text-left">
+                  <button key={s.seat} onClick={() => aim(s.seat)} aria-label={`Pop ${s.name}`} className="flex items-center gap-2 rounded-2xl border-2 border-bone/15 bg-soot p-3 text-left">
                     <Avatar seat={s} size={36} />
                     <span className="min-w-0">
                       <span className="block truncate font-display text-xl">{s.name}</span>
@@ -444,14 +444,14 @@ export function PhoneController({ room }: { room: string }) {
             <button
               onClick={fire}
               disabled={!trigCh || firing}
-              aria-label="Pull trigger"
+              aria-label="Pop it"
               className="animate-pulse-red aspect-square w-64 max-w-full rounded-full border-8 border-[#5c0f0c] bg-[radial-gradient(circle_at_40%_35%,#ff5a4e,#b3130e_60%,#6d0906)] font-display text-4xl leading-none tracking-wide shadow-[0_20px_60px_rgb(224_49_43/0.45)] active:scale-95 disabled:animate-none disabled:opacity-60"
             >
               {firing ? "…" : trigCh ? (
                 <>
-                  PULL
+                  POP
                   <br />
-                  TRIGGER
+                  IT
                   {(trigCh.requirePasskey || (state.config.faceIdOnTrigger && loadPasskey())) && <span className="mt-2 block font-crt text-lg">🔐 Face ID</span>}
                 </>
               ) : (
@@ -484,7 +484,7 @@ export function PhoneController({ room }: { room: string }) {
                 {target?.seat === me.seat ? <span className="text-blood">YOU</span> : target?.seat === cur.seat ? "themselves" : target?.name}
               </p>
             )}
-            {state.phase === "RESOLVING" && <p className="animate-pulse font-display text-5xl">💥</p>}
+            {state.phase === "RESOLVING" && <p className="animate-pulse font-display text-5xl">🎉</p>}
             {state.phase === "RIGGED" && state.rigged && (
               <p className="font-display text-4xl leading-tight">
                 <span className="text-blood">RIGGED!</span>
@@ -495,7 +495,7 @@ export function PhoneController({ room }: { room: string }) {
             )}
             {state.phase === "LAST_CALL" && (
               <>
-                <p className="font-display text-4xl">The gun is empty.</p>
+                <p className="font-display text-4xl">The popper is empty.</p>
                 <p className="font-type text-xl text-blood">Any last accusations?</p>
               </>
             )}

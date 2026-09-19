@@ -44,6 +44,54 @@ export function Chips({ n, size = 22, max = 8, color, className = "" }: { n: num
   );
 }
 
+export function GameTitle({ className = "" }: { className?: string }) {
+  return (
+    <span className={`vhs-title ${className}`}>
+      GAMBIT <span className="text-blood">RODEO</span>
+    </span>
+  );
+}
+
+const CONFETTI_COLORS = ["#e0312b", "#e8b13a", "#7dffa8", "#4ea8de", "#9b5de5", "#efe6d2", "#e4572e"];
+
+function bits(seed: number, n: number, spread: number) {
+  const out: { color: string; w: number; h: number; dx: number; dy: number; rot: number; delay: number }[] = [];
+  let s = Math.abs(seed % 2147483646) + 1;
+  for (let i = 0; i < n; i++) {
+    s = (s * 16807 + i * 97) % 2147483647;
+    const u = s / 2147483647;
+    s = (s * 48271) % 2147483647;
+    const v = s / 2147483647;
+    out.push({
+      color: CONFETTI_COLORS[i % CONFETTI_COLORS.length],
+      w: 5 + (i % 5) * 2,
+      h: 9 + (i % 4) * 3,
+      dx: (u - 0.5) * spread,
+      dy: -20 - v * spread * 0.65,
+      rot: (u - 0.5) * 540,
+      delay: (i % 7) * 0.03,
+    });
+  }
+  return out;
+}
+
+export function ConfettiBurst({ n = 18, seed = 1, spread = 220, className = "" }: { n?: number; seed?: number; spread?: number; className?: string }) {
+  return (
+    <div className={`pointer-events-none absolute inset-0 overflow-visible ${className}`} aria-hidden>
+      {bits(seed, n, spread).map((b, i) => (
+        <motion.span
+          key={i}
+          className="absolute left-1/2 top-1/2 rounded-[1px]"
+          style={{ width: b.w, height: b.h, background: b.color, marginLeft: -b.w / 2, marginTop: -b.h / 2 }}
+          initial={{ x: 0, y: 0, opacity: 1, rotate: 0, scale: 1 }}
+          animate={{ x: b.dx, y: b.dy, opacity: 0, rotate: b.rot, scale: 0.35 }}
+          transition={{ duration: 0.85, delay: b.delay, ease: "easeOut" }}
+        />
+      ))}
+    </div>
+  );
+}
+
 /** Profit in dollars: green up, red down. */
 export function Profit({ cents, className = "" }: { cents: number; className?: string }) {
   return (
@@ -54,7 +102,7 @@ export function Profit({ cents, className = "" }: { cents: number; className?: s
   );
 }
 
-/** A shotgun shell. `live` red, blank steel-blue, `spent` dim. */
+/** A live (red) or blank (steel-blue) charge. `spent` dims it. */
 export function Shell({ live, spent = false, size = 26, highlight = false }: { live: boolean; spent?: boolean; size?: number; highlight?: boolean }) {
   const body = live ? "#c42a24" : "#5d7488";
   return (

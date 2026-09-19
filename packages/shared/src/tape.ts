@@ -120,8 +120,8 @@ export function computeAwards(t: TapeData): Award[] {
     },
     {
       id: "sharpshooter",
-      emoji: "🔫",
-      title: "Sharpshooter",
+      emoji: "🎉",
+      title: "Confetti King",
       seats: sharp,
       detail: sharp.length ? `knocked ${damage.get(sharp[0])} chip(s) off other players` : "Nobody hit anybody.",
     },
@@ -130,14 +130,14 @@ export function computeAwards(t: TapeData): Award[] {
       emoji: "🍀",
       title: "Luckiest",
       seats: luckiest ? [luckiest.seat] : [],
-      detail: luckiest ? `Shot themselves at ${Math.round(luckiest.p * 100)}% LIVE odds and lived` : "Nobody pushed their luck.",
+      detail: luckiest ? `Popped themselves at ${Math.round(luckiest.p * 100)}% LIVE odds and lived` : "Nobody pushed their luck.",
     },
     {
       id: "slowest",
       emoji: "⏱",
-      title: "Slowest Trigger",
+      title: "Slowest Pop",
       seats: slow,
-      detail: slow.length ? `${(slowAvg.get(slow[0])! / 1000).toFixed(1)}s average before pulling` : "—",
+      detail: slow.length ? `${(slowAvg.get(slow[0])! / 1000).toFixed(1)}s average before popping` : "—",
     },
     {
       id: "customer",

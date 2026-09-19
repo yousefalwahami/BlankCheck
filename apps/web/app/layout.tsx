@@ -7,8 +7,8 @@ const vt323 = VT323({ weight: "400", subsets: ["latin"], variable: "--font-vt323
 const specialElite = Special_Elite({ weight: "400", subsets: ["latin"], variable: "--font-special-elite", display: "swap" });
 
 export const metadata: Metadata = {
-  title: "Blank Check",
-  description: "Everyone cheats. The chain remembers. A party game with Face ID triggers and a C referee on Thru.",
+  title: "Gambit Rodeo",
+  description: "Everyone cheats. The chain remembers. A party game with Face ID pops, chips, and a C referee on Thru.",
 };
 
 export const viewport: Viewport = {

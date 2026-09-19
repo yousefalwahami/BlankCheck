@@ -89,8 +89,8 @@ export async function think(id: BotId, v: BotView, rng: Rng, opts: { wantAim: bo
   const pLive = believedPLive(v);
   const heur = heuristicSuspicion({ countIsOff: v.odds.countIsOff, seats: v.others });
   const aimOptions: Record<string, string> = {
-    self: `Shoot myself. If it's a blank I keep my turn. (P(live) = ${pLive.toFixed(2)})`,
-    ...Object.fromEntries(v.others.map((o) => [`seat_${o.seat}`, `Shoot ${o.name} (${o.chips} chips)`])),
+    self: `Pop myself. If it's a blank I keep my turn. (P(live) = ${pLive.toFixed(2)})`,
+    ...Object.fromEntries(v.others.map((o) => [`seat_${o.seat}`, `Pop ${o.name} (${o.chips} chips)`])),
   };
   const state = {
     you: v.me,
@@ -104,7 +104,7 @@ export async function think(id: BotId, v: BotView, rng: Rng, opts: { wantAim: bo
   const answers =
     v.others.length > 0
       ? await askJev(state, {
-          ...(opts.wantAim ? { aim: choice("Who should I shoot with the chambered shell? Think in odds.", aimOptions) } : {}),
+          ...(opts.wantAim ? { aim: choice("Who should I pop with the chambered charge? Think in odds.", aimOptions) } : {}),
           cheatNow: noul("Playing my cheat card right now would help me without getting caught"),
           ...Object.fromEntries(v.others.map((o) => [`sus_${o.seat}`, noul(`${o.name} played a cheat card this round`)])),
           ...(opts.wantTaunt ? { taunt: choice("Which line fits this moment best?", TAUNT_CHOICES) } : {}),

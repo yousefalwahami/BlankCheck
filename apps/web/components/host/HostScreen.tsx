@@ -10,6 +10,7 @@ import { Overlays, emptyOverlayFx, type OverlayFx } from "./Overlays";
 import { ShellBoard, Table, type Flight, type SeatFx } from "./Table";
 import { TapeView } from "./Tape";
 import { Ticker } from "./Ticker";
+import { GameTitle } from "../ui/bits";
 
 const HOST_KEY = "bc.host";
 
@@ -214,7 +215,9 @@ export function HostScreen() {
     return (
       <main className="room-bg crt flex h-dvh flex-col items-center justify-center gap-4 text-center">
         <div className="grain" />
-        <p className="animate-flicker font-display text-[10vh]">BLANK CHECK</p>
+        <p className="font-display text-[10vh]">
+          <GameTitle />
+        </p>
         <p className="font-crt text-[3vh] text-ash">{connected ? "Setting the table…" : `Connecting to the game server at ${serverUrl || "…"}`}</p>
         {error && <p className="font-crt text-[2.5vh] text-blood">{error}</p>}
       </main>
@@ -226,17 +229,17 @@ export function HostScreen() {
   const caption = (() => {
     switch (state.phase) {
       case "ROUND_START":
-        return "The dealer is loading the gun…";
+        return "The dealer is loading the popper…";
       case "AWAIT_AIM":
         return `${cur?.name}'s turn. Pick a target.`;
       case "AWAIT_TRIGGER":
-        return `${cur?.name} is aiming at ${target?.seat === cur?.seat ? "THEMSELVES" : target?.name}…${state.config.faceIdOnTrigger && cur?.walletReady && cur.kind === "human" ? " (Face ID to fire)" : ""}`;
+        return `${cur?.name} is aiming at ${target?.seat === cur?.seat ? "THEMSELVES" : target?.name}…${state.config.faceIdOnTrigger && cur?.walletReady && cur.kind === "human" ? " (Face ID to pop)" : ""}`;
       case "RESOLVING":
-        return "⛓ Pulling the trigger on-chain…";
+        return "⛓ Popping on-chain…";
       case "RIGGED":
         return "RIGGED!";
       case "LAST_CALL":
-        return "The gun is empty.";
+        return "The popper is empty.";
       case "ROUND_END":
         return `Round ${state.round + 1} of ${state.config.rounds} is over. Paying out the pot…`;
       case "BUY_INS":

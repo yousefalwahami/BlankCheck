@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { GameTitle } from "@/components/ui/bits";
 
 export default function Home() {
   return (
@@ -6,8 +7,8 @@ export default function Home() {
       <div className="grain" />
       <div>
         <p className="font-crt text-xl tracking-[0.3em] text-ash">A PARTY GAME ABOUT CHEATING</p>
-        <h1 className="animate-flicker font-display text-7xl leading-none tracking-wide text-bone sm:text-9xl">
-          BLANK <span className="text-blood">CHECK</span>
+        <h1 className="font-display text-7xl leading-none tracking-wide text-bone sm:text-9xl">
+          <GameTitle />
         </h1>
         <p className="mt-4 font-type text-lg text-bone/80">Everyone cheats. The chain remembers.</p>
       </div>
@@ -26,7 +27,7 @@ export default function Home() {
         </Link>
       </div>
       <p className="max-w-lg font-crt text-lg leading-snug text-ash">
-        Buy in for $12, play for chips, cash out the rest. Face ID pulls the trigger and pays the buy-in; every shot, sealed envelope, accusation and payout is a transaction on Thru, refereed by a program written in C.
+        Buy in for $12, play for chips, cash out the rest. Face ID pops it and pays the buy-in; every live, sealed envelope, accusation and payout is a transaction on Thru, refereed by a program written in C.
       </p>
     </main>
   );

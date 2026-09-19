@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { createPasskey, describePasskeyError, forgetPasskey, loadPasskey, passkeysAvailable, signChallenge, type StoredPasskey } from "@/lib/passkey";
 import { resolveServerUrl } from "@/lib/serverUrl";
 import { unlockAudio } from "@/lib/sounds";
+import { GameTitle } from "@/components/ui/bits";
 
 export const NAME_KEY = "bc.name";
 
@@ -70,7 +71,7 @@ export function JoinForm() {
       <div className="grain" />
       <div className="w-full max-w-sm">
         <h1 className="text-center font-display text-6xl leading-none">
-          BLANK <span className="text-blood">CHECK</span>
+          <GameTitle />
         </h1>
         <p className="mt-2 text-center font-type text-bone/70">Take a seat. Everyone cheats.</p>
 
@@ -114,7 +115,7 @@ export function JoinForm() {
             ? passkey
               ? "Face ID unlocks your wallet. Same face, same wallet."
               : "Face ID creates your wallet. No app, no seed phrase."
-            : "Face ID needs HTTPS. On this connection you'll tap to fire instead."}
+            : "Face ID needs HTTPS. On this connection you'll tap to pop instead."}
         </p>
         {error && (
           <div className="mt-4 rounded-xl border border-blood bg-blood/10 p-3 text-center font-crt text-lg text-blood">
