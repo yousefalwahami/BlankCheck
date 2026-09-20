@@ -25,3 +25,6 @@ Thumbs.db
 .vscode/*
 !.vscode/extensions.json
 .idea/
+
+# Raw audio downloads, re-fetched by scripts/build-audio.mjs
+apps/web/.audio-cache/

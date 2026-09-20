@@ -335,7 +335,7 @@ announced. The stretch goal in spec §6.8 (phones seal their own envelopes with 
 | 3. Face ID on-chain | ✅ Built on `@thru/passkey` (wallet creation, challenges prefetched on aim, validate→CPI), and the same face signs the $12 buy-in. Device test: Phase 2.9 |
 | 4. Jev | ✅ Four personalities, typed taunts, Pit Boss meters; heuristic fallback |
 | 5. Review the Tape | ✅ VHS replay, browser re-hash, direct chain read, CAUGHT / GOT AWAY stamps, awards |
-| 6. Polish | ✅ Synthesized sound, CRT/VHS look, demo seed. Pitch rehearsal is yours |
+| 6. Polish | ✅ Recorded SFX + a jazz soundtrack, CRT/VHS look, demo seed. Pitch rehearsal is yours |
 
 ## Implementation notes (things the docs taught us)
 
@@ -356,6 +356,10 @@ announced. The stretch goal in spec §6.8 (phones seal their own envelopes with 
 - **SDK SHA-256** uses RISC-V Zknh instructions. The host test swaps only those four macros for C.
 - **House transactions** share `@thru/passkey`'s global fee-payer queue, and cache chain id, slot and nonce,
   so a shot costs one round trip.
-- **Sounds** are synthesized with Web Audio (no assets). The art is original; no Buckshot Roulette assets are used.
+- **Audio** is built by `node apps/web/scripts/build-audio.mjs` (needs ffmpeg): it fetches CC0 effect
+  packs and Kevin MacLeod's CC-BY jazz, then trims, layers, loops and peak-normalises everything into
+  `public/sfx` and `public/music`. The mix — levels, pitch variation, ducking — lives in `lib/sounds.ts`,
+  and the music only plays on the TV. Sources and licences are in [CREDITS.md](CREDITS.md). The art is
+  original; no Buckshot Roulette assets are used.
 - `@thru/replay` isn't used. The tape comes from the server's tx list, verified against the Table account read
   directly from Thru. That's cut-list item 5.

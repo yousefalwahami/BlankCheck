@@ -3,7 +3,7 @@
 import { BOTS, BOT_IDS, DEFAULT_ROUNDS, MAX_SEATS, MONEY, dollars, type BotId, type PublicState } from "@blankcheck/shared";
 import { AnimatePresence, motion } from "motion/react";
 import { QRCodeSVG } from "qrcode.react";
-import { Avatar, Chips, GameTitle } from "../ui/bits";
+import { Avatar, Chips, GameTitle, MusicCredit } from "../ui/bits";
 
 export function Lobby(props: {
   state: PublicState;
@@ -136,6 +136,8 @@ export function Lobby(props: {
             Referee: {state.refereeMode === "thru" ? "⛓ Thru alphanet (C program)" : "🧪 mock chain (same rules, in memory)"}
             <br />
             Bank: {state.bankMode === "thru" ? `⛓ ${MONEY.ticker} token on Thru (fake dollars)` : `🧪 in-memory ${MONEY.ticker} (fake dollars)`}
+            <br />
+            <MusicCredit className="text-ash/70" />
             {props.error && <span className="block text-blood">{props.error}</span>}
           </div>
           <button
