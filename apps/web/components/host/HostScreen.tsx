@@ -4,7 +4,7 @@ import { C2S, DEFAULT_ROUNDS, DEMO_ROUNDS, MAX_GAME_ROUNDS, MONEY, S2C, TIMING, 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { emitAck, getSocket, useConnected, useSocketEvent } from "@/lib/socket";
 import { resolveServerUrl } from "@/lib/serverUrl";
-import { sfx, setMuted, unlockAudio } from "@/lib/sounds";
+import { setMuted, setMusicEnabled, setScene, sfx, unlockAudio } from "@/lib/sounds";
 import { Lobby } from "./Lobby";
 import { Overlays, emptyOverlayFx, type OverlayFx } from "./Overlays";
 import { ShellBoard, Table, type Flight, type SeatFx } from "./Table";
@@ -116,6 +116,7 @@ export function HostScreen() {
           setPit({});
           setTape(null);
           sfx.rack();
+          setTimeout(() => sfx.deal(), 700);
           break;
         case "shot":
           setFx((x) => ({ ...x, shot: { ...f, at } }));
@@ -123,6 +124,7 @@ export function HostScreen() {
           if (f.live) {
             sfx.bang();
             fly({ from: f.target, to: "pot", n: 1, delay: 0.5 });
+            setTimeout(() => sfx.chip(), 1250); // the chip lands as the flight ends
           } else sfx.blank();
           break;
         case "mismatch":
@@ -135,19 +137,23 @@ export function HostScreen() {
         case "verdict":
           setFx((x) => ({ ...x, verdict: { ...f, at } }));
           sfx.gavel();
-          setTimeout(() => sfx.shatter(), 700);
+          setTimeout(() => (f.chips > 1 ? sfx.chips() : sfx.chip()), 700);
+          if (f.broke) setTimeout(() => sfx.shatter(), 1100);
           // The RIGGED! scene shows the handover; mirror it on the felt once the scene clears.
           if (f.chips > 0) fly({ from: f.from, to: f.to, n: f.chips, delay: TIMING.verdictShow / 1000 });
           break;
         case "potAward":
           setFx((x) => ({ ...x, potAward: { ...f, at } }));
           f.winners.forEach((w, i) => fly({ from: "pot", to: w, n: f.chipsEach, delay: 0.3 + i * 0.25 }));
-          if (f.winners.length) sfx.stamp();
+          if (f.winners.length) {
+            sfx.pot();
+            setTimeout(() => sfx.stack(), 500);
+          }
           break;
         case "buyIn":
           setSeatFx((x) => ({ ...x, [f.seat]: { kind: "buyIn", at } }));
           setFx((x) => ({ ...x, banner: { seat: f.seat, label: `💵 buys in: ${dollars(f.cents)} → ${f.chips} chips`, tone: "money", at } }));
-          sfx.tick();
+          sfx.chips();
           break;
         case "broke":
           setFx((x) => ({
@@ -168,6 +174,8 @@ export function HostScreen() {
           break;
         case "gameOver":
           setFx((x) => ({ ...x, gameOver: { ...f, at } }));
+          sfx.win();
+          setTimeout(() => sfx.cash(), 900);
           break;
         case "tape":
           setTape(f.tape);
@@ -196,6 +204,19 @@ export function HostScreen() {
     const t = setInterval(() => sfx.heartbeat(), 1100);
     return () => clearInterval(t);
   }, [state?.phase, state?.currentSeat, currentChips]);
+
+  /*
+   * The soundtrack follows what's on screen: the lounge theme in the lobby, a tenser bed at the
+   * table, and the noir loop under Review the Tape. Only the TV plays music — phones running the
+   * same loops a beat apart would sound like a broken radio.
+   */
+  useEffect(() => {
+    setMusicEnabled(sound);
+  }, [sound]);
+  useEffect(() => {
+    if (!state) return setScene(null);
+    setScene(tape || state.phase === "TAPE" ? "tape" : state.phase === "LOBBY" ? "lobby" : "table");
+  }, [state?.phase, tape, state]);
 
   const serverUrl = useMemo(() => (origin ? resolveServerUrl() : ""), [origin]);
   const joinUrl = state && origin ? `${origin}/join?room=${state.room}&server=${encodeURIComponent(serverUrl)}` : "";

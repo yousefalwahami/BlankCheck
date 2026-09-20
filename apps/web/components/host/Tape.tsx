@@ -22,7 +22,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { QRCodeSVG } from "qrcode.react";
 import { useEffect, useMemo, useState } from "react";
 import { sfx } from "@/lib/sounds";
-import { Avatar, ChipIcon, Profit, Shell, shortAddr } from "../ui/bits";
+import { Avatar, ChipIcon, MusicCredit, Profit, Shell, shortAddr } from "../ui/bits";
 import { useChainCheck } from "./useChainCheck";
 
 type Slide =
@@ -289,12 +289,13 @@ export function TapeView({ tape, state, onRestart }: { tape: TapeData; state: Pu
       </div>
       )}
 
-      <div className="z-10 flex items-center justify-between px-[2vw] pb-[2vh] font-crt text-[2.2vh] text-ash">
+      <div className="z-10 flex items-center justify-between gap-[2vw] px-[2vw] pb-[2vh] font-crt text-[2.2vh] text-ash">
         <span>
           {mode === "ledger"
             ? `LEDGER · ${events.length} events${filtered.length !== events.length ? ` · ${filtered.length} match` : ""}`
             : `${i + 1}/${slides.length} · ← → to scrub · space to pause`}
         </span>
+        <MusicCredit className="hidden text-ash/70 xl:inline" />
         <span>{state.seats.length} players · winner {name(tape.winner)}</span>
       </div>
     </div>

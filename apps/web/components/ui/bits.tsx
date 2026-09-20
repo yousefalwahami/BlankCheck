@@ -149,6 +149,26 @@ export function Avatar({
   );
 }
 
+/**
+ * The music is CC-BY 4.0, which requires the credit to travel with the work — so it shows on the
+ * lobby screen and at the end of the tape, not just in CREDITS.md.
+ */
+export function MusicCredit({ className = "" }: { className?: string }) {
+  return (
+    <span className={className}>
+      ♫{" "}
+      <a href="https://incompetech.com" target="_blank" rel="noreferrer" className="underline decoration-dotted underline-offset-2">
+        Kevin MacLeod
+      </a>{" "}
+      ·{" "}
+      <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noreferrer" className="underline decoration-dotted underline-offset-2">
+        CC BY 4.0
+      </a>{" "}
+      · sound effects CC0
+    </span>
+  );
+}
+
 export function shortAddr(a: string | null | undefined, n = 6): string {
   if (!a) return "";
   return a.length > 2 * n + 1 ? `${a.slice(0, n)}…${a.slice(-4)}` : a;
