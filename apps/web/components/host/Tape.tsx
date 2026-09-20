@@ -23,6 +23,7 @@ import { QRCodeSVG } from "qrcode.react";
 import { useEffect, useMemo, useState } from "react";
 import { sfx } from "@/lib/sounds";
 import { Avatar, ChipIcon, Profit, Shell, shortAddr } from "../ui/bits";
+import { EnvelopeReveal } from "../ui/envelope";
 import { useChainCheck } from "./useChainCheck";
 
 type Slide =
@@ -100,7 +101,7 @@ export function TapeView({ tape, state, onRestart }: { tape: TapeData; state: Pu
   }, [slide, paused, slides.length, mode]);
 
   useEffect(() => {
-    if (slide.kind === "cheat") setTimeout(() => sfx.stamp(), 900);
+    if (slide.kind === "cheat") setTimeout(() => sfx.stamp(), STAMP_DELAY * 1000);
     if (slide.kind === "shot" && slide.shot.cheats.length) setTimeout(() => sfx.stamp(), 900);
   }, [slide]);
 
@@ -230,13 +231,11 @@ export function TapeView({ tape, state, onRestart }: { tape: TapeData; state: Pu
                   <p className="font-crt text-[3vh] tracking-[0.3em] text-ash">
                     ROUND {slide.round.round + 1} · ENVELOPE #{slide.env.window + 1}
                   </p>
-                  <div className="rounded-xl bg-bone px-8 py-5 font-type text-[5vh] text-ink shadow-2xl">
-                    {CHEAT_INFO[slide.env.cheat].emoji} {CHEAT_INFO[slide.env.cheat].name} on shell #{slide.env.shell + 1}
-                  </div>
+                  <CheatEnvelope key={`${slide.round.round}:${slide.env.window}:${slide.env.seat}`} env={slide.env} />
                   <motion.p
                     initial={{ scale: 1.8, opacity: 0, rotate: -18 }}
                     animate={{ scale: 1, opacity: 1, rotate: -6 }}
-                    transition={{ delay: 0.8, type: "spring", stiffness: 280, damping: 14 }}
+                    transition={{ delay: STAMP_DELAY, type: "spring", stiffness: 280, damping: 14 }}
                     className={`stamp whitespace-nowrap text-[8vh] leading-none ${slide.env.caught ? "text-crt" : "text-blood"}`}
                   >
                     {slide.env.caught ? "CAUGHT" : "GOT AWAY WITH IT"}
@@ -297,6 +296,40 @@ export function TapeView({ tape, state, onRestart }: { tape: TapeData; state: Pu
         </span>
         <span>{state.seats.length} players · winner {name(tape.winner)}</span>
       </div>
+    </div>
+  );
+}
+
+/** The flap breaks at 800ms and the letter is clear of the pocket by ~1.5s, so the stamp lands after it. */
+const FLAP_AT_MS = 800;
+const STAMP_DELAY = 1.7;
+
+/**
+ * The cheat itself, sealed for a beat and then opened. Keyed on the envelope so scrubbing back
+ * into a slide remounts this and replays the reveal instead of showing an already-open envelope.
+ */
+function CheatEnvelope({ env, w = 380 }: { env: TapeEnvelope; w?: number }) {
+  const [open, setOpen] = useState(false);
+  const info = CHEAT_INFO[env.cheat];
+
+  useEffect(() => {
+    setOpen(false);
+    const t = setTimeout(() => {
+      setOpen(true);
+      sfx.card();
+    }, FLAP_AT_MS);
+    return () => clearTimeout(t);
+  }, [env]);
+
+  // The letter rises roughly an envelope-height out of the pocket; reserve that room above it.
+  return (
+    <div className="relative flex items-end" style={{ width: w, height: w * 0.66 * 1.6 }}>
+      <EnvelopeReveal w={w} open={open} tone={env.caught ? "clean" : "guilty"}>
+        <span className="block whitespace-nowrap text-[3.6vh] leading-tight">
+          {info.emoji} {info.name}
+        </span>
+        <span className="block text-[2.2vh] leading-tight text-ink/70">on shell #{env.shell + 1}</span>
+      </EnvelopeReveal>
     </div>
   );
 }

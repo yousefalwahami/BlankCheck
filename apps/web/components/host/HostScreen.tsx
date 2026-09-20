@@ -5,12 +5,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { emitAck, getSocket, useConnected, useSocketEvent } from "@/lib/socket";
 import { resolveServerUrl } from "@/lib/serverUrl";
 import { sfx, setMuted, unlockAudio } from "@/lib/sounds";
+import { Coach } from "./Coach";
 import { Lobby } from "./Lobby";
 import { Overlays, emptyOverlayFx, type OverlayFx } from "./Overlays";
 import { ShellBoard, Table, type Flight, type SeatFx } from "./Table";
 import { TapeView } from "./Tape";
 import { Ticker } from "./Ticker";
 import { GameTitle } from "../ui/bits";
+import type { SealFlight } from "../ui/envelope";
 
 const HOST_KEY = "bc.host";
 
@@ -48,6 +50,9 @@ export function HostScreen() {
   const [tape, setTape] = useState<TapeData | null>(null);
   const [fx, setFx] = useState<OverlayFx>(emptyOverlayFx);
   const [flights, setFlights] = useState<Flight[]>([]);
+  const [seals, setSeals] = useState<SealFlight[]>([]);
+  const [sealed, setSealed] = useState(0);
+  const [coach, setCoach] = useState(false);
   const [taunts, setTaunts] = useState<Record<number, { text: string; at: number }>>({});
   const [seatFx, setSeatFx] = useState<Record<number, SeatFx>>({});
   const [error, setError] = useState<string | null>(null);
@@ -55,6 +60,9 @@ export function HostScreen() {
   const [sound, setSound] = useState(false);
   const [origin, setOrigin] = useState("");
   const flightSeq = useRef(0);
+  const sealSeq = useRef(0);
+  /** The envelope explainer plays once a game, right after the first shot. */
+  const coachShown = useRef(false);
 
   useEffect(() => setOrigin(window.location.origin), []);
 
@@ -106,6 +114,18 @@ export function HostScreen() {
     stateRef.current = state;
   }, [state]);
 
+  /** Every shot seals one envelope per player. They fly off the felt into the evidence jar. */
+  const sealEnvelopes = useCallback(() => {
+    const seats = (stateRef.current?.seats ?? []).filter((s) => !s.cleanedOut).map((s) => s.seat);
+    if (!seats.length) return;
+    const batch = seats.map((from, i) => ({ id: ++sealSeq.current, from, delay: 0.6 + i * 0.09 }));
+    setSeals((x) => [...x.slice(-18), ...batch]);
+    setSealed((n) => n + seats.length);
+    setTimeout(() => sfx.card(), 650);
+    const ids = new Set(batch.map((b) => b.id));
+    setTimeout(() => setSeals((x) => x.filter((f) => !ids.has(f.id))), 2800 + seats.length * 90);
+  }, []);
+
   useSocketEvent<Fx>(
     S2C.fx,
     useCallback((f: Fx) => {
@@ -115,6 +135,8 @@ export function HostScreen() {
           setFx((x) => ({ ...x, round: { ...f, at }, mismatch: null }));
           setPit({});
           setTape(null);
+          setSeals([]);
+          setSealed(0);
           sfx.rack();
           break;
         case "shot":
@@ -124,6 +146,11 @@ export function HostScreen() {
             sfx.bang();
             fly({ from: f.target, to: "pot", n: 1, delay: 0.5 });
           } else sfx.blank();
+          sealEnvelopes();
+          if (!coachShown.current) {
+            coachShown.current = true;
+            setTimeout(() => setCoach(true), TIMING.shotAnim + 400);
+          }
           break;
         case "mismatch":
           setFx((x) => ({ ...x, mismatch: { ...f, at } }));
@@ -178,7 +205,7 @@ export function HostScreen() {
           sfx.boo();
           break;
       }
-    }, [fly]),
+    }, [fly, sealEnvelopes]),
   );
 
   const currentChips = state?.seats[state.currentSeat]?.chips ?? 0;
@@ -221,6 +248,9 @@ export function HostScreen() {
     setTxs([]);
     setFx(emptyOverlayFx);
     setFlights([]);
+    setSeals([]);
+    setSealed(0);
+    setCoach(false);
     await act(C2S.gameRestart);
   };
 
@@ -310,7 +340,7 @@ export function HostScreen() {
             <p className="font-display text-[4vh] tracking-wide">{caption}</p>
           </header>
           <section className="relative min-h-0 flex-1">
-            <Table state={state} pit={pit} taunts={taunts} seatFx={seatFx} flights={flights} />
+            <Table state={state} pit={pit} taunts={taunts} seatFx={seatFx} flights={flights} seals={seals} sealed={sealed} />
             <aside className="absolute right-[1.5vw] top-0 hidden max-h-[16vh] w-[22vw] flex-col justify-end gap-0.5 overflow-hidden text-right font-crt text-[1.8vh] leading-tight text-ash xl:flex">
               {state.log.slice(-4).map((e) => (
                 <p key={e.id} className={e.kind === "verdict" || e.kind === "rigged" ? "text-blood" : e.kind === "mismatch" ? "text-brass" : e.kind === "money" ? "text-crt" : ""}>
@@ -329,6 +359,7 @@ export function HostScreen() {
       )}
 
       <Overlays state={state} fx={fx} txs={txs} />
+      {coach && <Coach onDone={() => setCoach(false)} />}
       <button
         onClick={(e) => {
           e.stopPropagation();

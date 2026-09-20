@@ -102,14 +102,35 @@ export function Profit({ cents, className = "" }: { cents: number; className?: s
   );
 }
 
-/** A live (red) or blank (steel-blue) charge. `spent` greys it out and tips it over. */
-export function Shell({ live, spent = false, size = 26, highlight = false }: { live: boolean; spent?: boolean; size?: number; highlight?: boolean }) {
-  const body = live ? "#c42a24" : "#5d7488";
+/**
+ * A live (red) or blank (steel-blue) charge. `spent` greys it out and tips it over.
+ * `mystery` keeps the silhouette but hides which it is — nothing about the body may hint at `live`.
+ */
+export function Shell({
+  live,
+  spent = false,
+  size = 26,
+  highlight = false,
+  mystery = false,
+}: {
+  live: boolean;
+  spent?: boolean;
+  size?: number;
+  highlight?: boolean;
+  mystery?: boolean;
+}) {
+  const body = mystery ? "#3a2f20" : live ? "#c42a24" : "#5d7488";
   return (
     <span className={`inline-block origin-bottom ${spent ? "rotate-[22deg] opacity-40 grayscale" : ""}`}>
-      <svg width={size * 0.5} height={size} viewBox="0 0 20 40" aria-label={live ? "live shell" : "blank shell"}>
+      <svg width={size * 0.5} height={size} viewBox="0 0 20 40" aria-label={mystery ? "face-down shell" : live ? "live shell" : "blank shell"}>
         <rect x="2" y="2" width="16" height="28" rx="3" fill={body} stroke={highlight ? "#e8b13a" : "#000"} strokeWidth={highlight ? 2.5 : 1} />
-        <rect x="4" y="5" width="3" height="22" rx="1.5" fill="#fff" opacity="0.18" />
+        {mystery ? (
+          <text x="10" y="16.5" textAnchor="middle" dominantBaseline="central" fontSize="17" fill="#e8b13a" className="font-display">
+            ?
+          </text>
+        ) : (
+          <rect x="4" y="5" width="3" height="22" rx="1.5" fill="#fff" opacity="0.18" />
+        )}
         <rect x="1" y="29" width="18" height="9" rx="1.5" fill="#b8912f" stroke="#000" strokeWidth="1" />
         <circle cx="10" cy="33.5" r="2.5" fill="#6b5418" />
       </svg>

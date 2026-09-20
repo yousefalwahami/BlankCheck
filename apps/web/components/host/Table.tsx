@@ -2,7 +2,9 @@
 
 import { MONEY, dollars, type PitBossReading, type PublicState } from "@blankcheck/shared";
 import { AnimatePresence, motion } from "motion/react";
+import { useEffect, useState } from "react";
 import { Avatar, ChipIcon, Chips, ConfettiBurst, Shell, seatColor } from "../ui/bits";
+import { EnvelopeGlyph, EvidenceJar, type SealFlight } from "../ui/envelope";
 
 export type SeatFx = { kind: "hit" | "miss" | "boo" | "buyIn"; at: number };
 
@@ -10,6 +12,13 @@ export type SeatFx = { kind: "hit" | "miss" | "boo" | "buyIn"; at: number };
 export type Flight = { id: number; from: number | "pot"; to: number | "pot"; n: number; delay?: number };
 
 const POT = { x: 50, y: 50 };
+
+/** The jar corner. Seats never reach here: the closest one ever gets is (14.5, 68.5), at a full table. */
+const JAR = { x: 7, y: 78 };
+const JAR_W = 104;
+/** Matches the stagger the host starts the batch with, so the jar reacts as the first envelope lands. */
+const SEAL_LEAD = 0.6;
+const SEAL_FLIGHT = 1.1;
 
 function seatPos(i: number, n: number) {
   const theta = Math.PI / 2 + (i * 2 * Math.PI) / n; // seat 0 at the bottom, clockwise
@@ -35,15 +44,18 @@ export function ShellBoard({ state }: { state: PublicState }) {
         </p>
       </div>
       <div className="h-[6vh] w-px bg-bone/15" />
-      <div>
+      <div className="text-center">
+        <p className={`text-[1.8vh] tracking-[0.3em] ${countIsOff ? "text-brass" : "text-ash"}`}>
+          {countIsOff ? "FIRED / LOADED" : "LEFT IN THE POPPER"}
+        </p>
         <p>
           <span className={liveOver ? "animate-pulse font-bold text-brass" : "text-blood"}>
-            {liveOver ? fired.live : liveLeft}/{announced.live} LIVE
+            {liveOver ? fired.live : liveLeft} of {announced.live} LIVE
             {liveOver ? " ⚠" : ""}
           </span>
           {" · "}
           <span className={blankOver ? "animate-pulse font-bold text-brass" : "text-steel"}>
-            {blankOver ? fired.blank : blankLeft}/{announced.blank} BLANK
+            {blankOver ? fired.blank : blankLeft} of {announced.blank} BLANK
             {blankOver ? " ⚠" : ""}
           </span>
         </p>
@@ -197,12 +209,62 @@ function FlightView({ f, n }: { f: Flight; n: number }) {
   );
 }
 
+/** One sealed envelope tumbling off a seat and down into the jar. */
+function SealFlightView({ f, n }: { f: SealFlight; n: number }) {
+  const a = seatPos(f.from, n);
+  const delay = f.delay ?? 0;
+  return (
+    <motion.div
+      className="pointer-events-none absolute z-30 -translate-x-1/2 -translate-y-1/2"
+      initial={{ left: `${a.x}%`, top: `${a.y}%`, opacity: 0 }}
+      animate={{ left: `${JAR.x}%`, top: `${JAR.y}%`, opacity: [0, 1, 1, 0] }}
+      transition={{ duration: SEAL_FLIGHT, delay, ease: "easeInOut" }}
+    >
+      <motion.div
+        initial={{ y: 0, rotate: -14, scale: 0.6 }}
+        animate={{ y: [0, -38, 8], rotate: [-14, 172, 368], scale: [0.6, 1.2, 0.5] }}
+        transition={{ duration: SEAL_FLIGHT, delay, ease: "easeInOut" }}
+      >
+        <EnvelopeGlyph w={44} />
+      </motion.div>
+    </motion.div>
+  );
+}
+
+/** The evidence jar on the felt, with the running count of envelopes the table has sealed this round. */
+function JarSpot({ sealed }: { sealed: number }) {
+  const [landing, setLanding] = useState(false);
+  useEffect(() => {
+    if (sealed === 0) return;
+    const at = (SEAL_LEAD + SEAL_FLIGHT) * 1000;
+    const on = setTimeout(() => setLanding(true), at);
+    const off = setTimeout(() => setLanding(false), at + 520);
+    return () => {
+      clearTimeout(on);
+      clearTimeout(off);
+    };
+  }, [sealed]);
+
+  return (
+    <div className="absolute z-10 -translate-x-1/2 -translate-y-1/2" style={{ left: `${JAR.x}%`, top: `${JAR.y}%` }}>
+      <EvidenceJar sealed={sealed} w={JAR_W} shake={landing} />
+      {/* Two short lines: the jar sits close to the left edge, so a wide label would run off screen. */}
+      <div className="absolute left-1/2 top-full mt-[0.8vh] -translate-x-1/2 whitespace-nowrap text-center leading-tight">
+        <p className="font-crt text-[1.9vh] tracking-[0.2em] text-ash">EVIDENCE</p>
+        <p className="font-crt text-[2.1vh] text-brass">{sealed} SEALED</p>
+      </div>
+    </div>
+  );
+}
+
 export function Table(props: {
   state: PublicState;
   pit: PitBossReading;
   taunts: Record<number, { text: string; at: number }>;
   seatFx: Record<number, SeatFx>;
   flights: Flight[];
+  seals: SealFlight[];
+  sealed: number;
 }) {
   const { state } = props;
   const n = state.seats.length;
@@ -218,9 +280,13 @@ export function Table(props: {
     <div className="relative h-full w-full">
       <div className="felt absolute left-[14%] right-[14%] top-[16%] bottom-[16%] rounded-[50%] border-[10px] border-[#2a1a0e]" />
       <PotPile n={state.pot} />
+      <JarSpot sealed={props.sealed} />
       <ConfettiPopper angle={popAngle} raised={aiming} />
       {props.flights.map((f) => (
         <FlightView key={f.id} f={f} n={n} />
+      ))}
+      {props.seals.map((f) => (
+        <SealFlightView key={f.id} f={f} n={n} />
       ))}
 
       {state.seats.map((s) => {

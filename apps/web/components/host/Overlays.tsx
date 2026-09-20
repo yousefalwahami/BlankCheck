@@ -4,6 +4,7 @@ import { CHEAT_INFO, MONEY, TIMING, dollars, type ChainTx, type Fx, type PublicS
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useState } from "react";
 import { Avatar, ChipIcon, ConfettiBurst, Profit, Shell } from "../ui/bits";
+import { EnvelopeGlyph, EnvelopeReveal } from "../ui/envelope";
 
 type Timed<T> = (T & { at: number }) | null;
 export type OverlayFx = {
@@ -49,28 +50,7 @@ export function Overlays({ state, fx, txs }: { state: PublicState; fx: OverlayFx
        * The overlays that black out the table mount and unmount outright. A background tab pauses
        * animation frames, an exit animation never finishes, and the table stays hidden for good.
        */}
-      {showRound && fx.round && (
-        <motion.div key={`round-${fx.round.at}`} className={`${full} bg-black/80`} initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-          <motion.p initial={{ y: -30, opacity: 0 }} animate={{ y: 0, opacity: 1 }} className="font-crt text-[3vh] tracking-[0.5em] text-ash">
-            THE DEALER LOADS THE POPPER
-          </motion.p>
-          <motion.h2 initial={{ scale: 2.4, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ type: "spring", stiffness: 160, damping: 14 }} className="font-display text-[18vh] leading-none">
-            ROUND {fx.round.round + 1}
-          </motion.h2>
-          <p className="font-crt text-[3vh] tracking-[0.5em] text-ash">OF {fx.round.rounds}</p>
-          <div className="mt-[3vh] flex items-end gap-[1vw]">
-            {[...Array(fx.round.live).fill(1), ...Array(fx.round.blank).fill(0)].map((s, i) => (
-              <motion.div key={i} initial={{ y: 60, opacity: 0, rotate: -20 }} animate={{ y: 0, opacity: 1, rotate: 0 }} transition={{ delay: 0.4 + i * 0.12 }}>
-                <Shell live={s === 1} size={96} />
-              </motion.div>
-            ))}
-          </div>
-          <p className="mt-[3vh] font-display text-[7vh] tracking-wide">
-            <span className="text-blood">{fx.round.live} LIVE</span> · <span className="text-steel">{fx.round.blank} BLANK</span>
-          </p>
-          <p className="mt-[1vh] font-type text-[2.6vh] text-bone/70">Order sealed on-chain. Cheat cards dealt. Every live shell costs a chip.</p>
-        </motion.div>
-      )}
+      {showRound && fx.round && <RoundIntro key={`round-${fx.round.at}`} round={fx.round} />}
 
       <AnimatePresence>
         {showShot && fx.shot && (
@@ -210,6 +190,58 @@ export function Overlays({ state, fx, txs }: { state: PublicState; fx: OverlayFx
   );
 }
 
+/**
+ * The dealer loading the popper. Everything here has to land inside TIMING.roundIntro, so the
+ * per-shell stagger is sized for the worst case (8 shells) and the copy follows the last one in.
+ */
+function RoundIntro({ round }: { round: NonNullable<OverlayFx["round"]> }) {
+  const total = round.live + round.blank;
+  const loaded = 0.35 + total * 0.14;
+  return (
+    <motion.div className={`${full} bg-black/80`} initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+      <motion.p initial={{ y: -30, opacity: 0 }} animate={{ y: 0, opacity: 1 }} className="font-crt text-[3vh] tracking-[0.5em] text-ash">
+        THE DEALER LOADS THE POPPER
+      </motion.p>
+      <motion.h2 initial={{ scale: 2.4, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ type: "spring", stiffness: 160, damping: 14 }} className="font-display text-[18vh] leading-none">
+        ROUND {round.round + 1}
+      </motion.h2>
+      <p className="font-crt text-[3vh] tracking-[0.5em] text-ash">OF {round.rounds}</p>
+
+      {/* The chamber is open at the top; the charges drop in face-down so no order is implied. */}
+      <div className="mt-[3vh] flex h-[16vh] items-end gap-[1vw] rounded-b-[1.5vh] border-x-4 border-b-4 border-brass/60 bg-soot/80 px-[1.5vw] pb-[1.2vh] shadow-[inset_0_0_4vh_rgba(0,0,0,0.85)]">
+        {Array.from({ length: total }, (_, i) => (
+          <motion.div
+            key={i}
+            initial={{ y: "-20vh", opacity: 0, rotate: -18 }}
+            animate={{ y: 0, opacity: 1, rotate: 0 }}
+            transition={{ delay: 0.35 + i * 0.14, type: "spring", stiffness: 280, damping: 20 }}
+          >
+            <Shell live={false} mystery size={96} />
+          </motion.div>
+        ))}
+      </div>
+
+      <motion.div
+        initial={{ scale: 0.8, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        transition={{ delay: loaded, type: "spring", stiffness: 240, damping: 16 }}
+        className="mt-[2.5vh] flex flex-wrap items-baseline justify-center gap-x-[1.5vw] gap-y-[0.5vh]"
+      >
+        <span className="font-display text-[10vh] leading-none tracking-wide">
+          <span className="text-brass">{total}</span> POPPERS
+        </span>
+        <span className="font-display text-[5vh] leading-none tracking-wide">
+          <span className="text-blood">{round.live} LIVE</span> <span className="text-ash">·</span> <span className="text-steel">{round.blank} BLANK</span>
+        </span>
+      </motion.div>
+
+      <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: loaded + 0.18, duration: 0.3 }} className="mt-[1vh] font-type text-[2.8vh] text-bone/70">
+        Order unknown. Even you don&apos;t know what&apos;s next.
+      </motion.p>
+    </motion.div>
+  );
+}
+
 function GameOver({ state, over }: { state: PublicState; over: NonNullable<OverlayFx["gameOver"]> }) {
   const name = (i: number) => state.seats[i]?.name ?? `Seat ${i + 1}`;
   const ranked = [...over.results].sort((a, b) => b.profitCents - a.profitCents || a.seat - b.seat);
@@ -260,6 +292,9 @@ function GameOver({ state, over }: { state: PublicState; over: NonNullable<Overl
     </motion.div>
   );
 }
+
+/** Wide enough for the flap's 3D swing and for four of them to sit side by side. */
+const ENVELOPE_W = 220;
 
 function RiggedScene({ state, txs }: { state: PublicState; txs: ChainTx[] }) {
   const r = state.rigged!;
@@ -315,16 +350,15 @@ function RiggedScene({ state, txs }: { state: PublicState; txs: ChainTx[] }) {
 
             {!r.verdict ? (
               <div className="flex flex-col items-center gap-[2vh]">
-                <div className="flex gap-3">
+                <div className="flex items-end gap-[1vw]">
                   {[0, 1, 2, 3].map((i) => (
                     <motion.div
                       key={i}
                       initial={{ y: 200, rotate: (i - 1.5) * 30, opacity: 0 }}
                       animate={{ y: 0, rotate: (i - 1.5) * 8, opacity: 1 }}
                       transition={{ delay: i * 0.15, type: "spring" }}
-                      className="text-[9vh]"
                     >
-                      ✉️
+                      <EnvelopeGlyph w={140} />
                     </motion.div>
                   ))}
                 </div>
@@ -351,22 +385,22 @@ function RiggedScene({ state, txs }: { state: PublicState; txs: ChainTx[] }) {
                     </>
                   )}
                 </p>
-                <div className="flex flex-wrap justify-center gap-3">
-                  {guilty ? (
-                    r.evidence?.map((e, i) => (
-                      <motion.div
-                        key={i}
-                        initial={{ y: 30, opacity: 0 }}
-                        animate={{ y: 0, opacity: 1 }}
-                        transition={{ delay: 0.3 + i * 0.2 }}
-                        className="rounded-lg bg-bone px-5 py-3 font-type text-[3.2vh] text-ink shadow-xl"
-                      >
-                        {CHEAT_INFO[e.cheat].emoji} {CHEAT_INFO[e.cheat].name} on shell #{e.shell + 1}
-                      </motion.div>
-                    ))
-                  ) : (
-                    <p className="rounded-lg bg-bone px-5 py-3 font-type text-[3.2vh] text-ink">Every envelope said “nothing.”</p>
-                  )}
+                {/* The letters rise a full envelope clear of the pocket, so the row reserves headroom above itself. */}
+                <div className="flex items-end justify-center gap-[2vw]" style={{ height: ENVELOPE_W * 1.2 }}>
+                  {guilty
+                    ? r.evidence?.map((e, i) => (
+                        <EnvelopeReveal key={i} w={ENVELOPE_W} open={stage === "open"} tone="guilty" delay={0.4 + i * 0.25}>
+                          <span className="block text-[2.4vh] leading-tight">
+                            {CHEAT_INFO[e.cheat].emoji} {CHEAT_INFO[e.cheat].name}
+                          </span>
+                          <span className="block text-[1.8vh] leading-tight text-ink/70">on shell #{e.shell + 1}</span>
+                        </EnvelopeReveal>
+                      ))
+                    : [0, 1, 2, 3].map((i) => (
+                        <EnvelopeReveal key={i} w={ENVELOPE_W} open={stage === "open"} tone="clean" delay={0.4 + i * 0.25}>
+                          <span className="block text-[2.4vh] leading-tight tracking-wide">NOTHING</span>
+                        </EnvelopeReveal>
+                      ))}
                 </div>
                 {revealTx && (
                   <p className="font-crt text-[2.4vh] text-crt">
