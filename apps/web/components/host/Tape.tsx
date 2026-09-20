@@ -71,11 +71,21 @@ export function TapeView({ tape, state, onRestart }: { tape: TapeData; state: Pu
   );
 
   const [i, setI] = useState(0);
+  const [dir, setDir] = useState<1 | -1>(1);
   const [paused, setPaused] = useState(false);
   const [mode, setMode] = useState<"play" | "ledger">("play");
   const [query, setQuery] = useState("");
   const [chip, setChip] = useState<LedgerChip>("all");
   const slide = slides[Math.min(i, slides.length - 1)];
+  const last = slides.length - 1;
+
+  const go = (delta: number) => {
+    setI((x) => {
+      const n = Math.max(0, Math.min(x + delta, last));
+      if (n !== x) setDir(delta < 0 ? -1 : 1);
+      return n;
+    });
+  };
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -85,7 +95,7 @@ export function TapeView({ tape, state, onRestart }: { tape: TapeData; state: Pu
   useEffect(() => {
     const d = DURATION[slide.kind];
     if (!d || paused || mode === "ledger") return;
-    const t = setTimeout(() => setI((x) => Math.min(x + 1, slides.length - 1)), d);
+    const t = setTimeout(() => go(1), d);
     return () => clearTimeout(t);
   }, [slide, paused, slides.length, mode]);
 
@@ -98,8 +108,8 @@ export function TapeView({ tape, state, onRestart }: { tape: TapeData; state: Pu
     const onKey = (e: KeyboardEvent) => {
       const typing = e.target instanceof HTMLElement && (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA");
       if (typing) return;
-      if (e.key === "ArrowRight") setI((x) => Math.min(x + 1, slides.length - 1));
-      if (e.key === "ArrowLeft") setI((x) => Math.max(0, x - 1));
+      if (e.key === "ArrowRight") go(1);
+      if (e.key === "ArrowLeft") go(-1);
       if (e.key === " ") {
         e.preventDefault();
         setPaused((p) => !p);
@@ -117,7 +127,10 @@ export function TapeView({ tape, state, onRestart }: { tape: TapeData; state: Pu
 
   const jumpTo = (e: TapeLedgerEvent) => {
     const idx = slideIndexForEvent(slides, e);
-    if (idx >= 0) setI(idx);
+    if (idx >= 0) {
+      setDir(idx < i ? -1 : 1);
+      setI(idx);
+    }
     setMode("play");
     setPaused(true);
   };
@@ -161,13 +174,19 @@ export function TapeView({ tape, state, onRestart }: { tape: TapeData; state: Pu
       {mode === "ledger" ? (
         <TapeLedger events={filtered} query={query} onQuery={setQuery} chip={chip} onChip={setChip} tx={tx} onJump={jumpTo} />
       ) : (
-      <div className="relative z-0 flex flex-1 items-center justify-center px-[5vw]" onClick={() => setI((x) => Math.min(x + 1, slides.length - 1))}>
-        <AnimatePresence mode="wait">
+      <div className="relative z-0 flex flex-1 items-center justify-center px-[5vw]" onClick={() => go(1)}>
+        <AnimatePresence mode="wait" custom={dir}>
           <motion.div
             key={i}
-            initial={{ opacity: 0, x: 40 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: -40 }}
+            custom={dir}
+            variants={{
+              enter: (d: 1 | -1) => ({ opacity: 0, x: 48 * d }),
+              show: { opacity: 1, x: 0 },
+              leave: (d: 1 | -1) => ({ opacity: 0, x: -48 * d }),
+            }}
+            initial="enter"
+            animate="show"
+            exit="leave"
             transition={{ duration: 0.35 }}
             className="w-full"
           >

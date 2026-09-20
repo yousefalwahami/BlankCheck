@@ -20,7 +20,11 @@ export function ShellBoard({ state }: { state: PublicState }) {
   const { announced, fired, countIsOff } = state;
   const liveOver = fired.live > announced.live;
   const blankOver = fired.blank > announced.blank;
+  const liveLeft = Math.max(0, announced.live - fired.live);
+  const blankLeft = Math.max(0, announced.blank - fired.blank);
   const shells = [...Array(announced.live).fill(1), ...Array(announced.blank).fill(0)] as (0 | 1)[];
+  let liveSeen = 0;
+  let blankSeen = 0;
   return (
     <div className="flex items-center gap-[2vw] rounded-2xl border border-bone/10 bg-black/50 px-[2vw] py-[1vh] font-crt text-[2.6vh]">
       <div className="text-center">
@@ -32,35 +36,23 @@ export function ShellBoard({ state }: { state: PublicState }) {
       </div>
       <div className="h-[6vh] w-px bg-bone/15" />
       <div>
-        <p className="text-[1.8vh] tracking-[0.3em] text-ash">ANNOUNCED</p>
-        <p>
-          <span className="text-blood">{announced.live} LIVE</span> · <span className="text-steel">{announced.blank} BLANK</span>
-        </p>
-      </div>
-      <div className="flex items-end gap-1">
-        {shells.map((s, i) => (
-          <Shell key={i} live={s === 1} size={34} />
-        ))}
-      </div>
-      <div className="h-[6vh] w-px bg-bone/15" />
-      <div>
-        <p className="text-[1.8vh] tracking-[0.3em] text-ash">FIRED</p>
         <p>
           <span className={liveOver ? "animate-pulse font-bold text-brass" : "text-blood"}>
-            LIVE {fired.live}/{announced.live}
+            {liveOver ? fired.live : liveLeft}/{announced.live} LIVE
             {liveOver ? " ⚠" : ""}
-          </span>{" "}
-          ·{" "}
+          </span>
+          {" · "}
           <span className={blankOver ? "animate-pulse font-bold text-brass" : "text-steel"}>
-            BLANK {fired.blank}/{announced.blank}
+            {blankOver ? fired.blank : blankLeft}/{announced.blank} BLANK
             {blankOver ? " ⚠" : ""}
           </span>
         </p>
       </div>
-      <div className="h-[6vh] w-px bg-bone/15" />
-      <div className="text-center">
-        <p className="text-[1.8vh] tracking-[0.3em] text-ash">IN THE TUBE</p>
-        <p className="font-display text-[4vh] leading-none">{state.shellsLeft}</p>
+      <div className="flex items-end gap-1.5 overflow-visible py-[0.8vh]">
+        {shells.map((s, i) => {
+          const spent = s === 1 ? liveSeen++ < fired.live : blankSeen++ < fired.blank;
+          return <Shell key={i} live={s === 1} spent={spent} size={34} />;
+        })}
       </div>
       <div className="h-[6vh] w-px bg-bone/15" />
       <div className="text-center">

@@ -269,7 +269,7 @@ function RiggedScene({ state, txs }: { state: PublicState; txs: ChainTx[] }) {
     return () => clearTimeout(t);
   }, []);
   const name = (i: number) => state.seats[i]?.name ?? `Seat ${i + 1}`;
-  const revealTx = [...txs].reverse().find((t) => t.kind === "REVEAL");
+  const revealTx = [...txs].reverse().find((t) => t.kind === "REVEAL" && t.ok);
   const guilty = r.verdict === "GUILTY";
   const moved = r.chipsMoved ?? 0;
   // Accuser on the left, accused on the right. Guilty: the cheater's chips slide left. Innocent: the accuser pays 1, sliding right.

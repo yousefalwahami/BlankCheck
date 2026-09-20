@@ -17,6 +17,51 @@ import type { Receipt } from "../referee/Referee";
 const SUBMISSION_ACCEPTED = 2;
 export const CREATING_PROOF = 1; // StateProofType.CREATING
 
+/*
+ * Thru runtime error codes (signed i32). 0xFFFFFD03 = VM_REVERT: the program exited with a revert,
+ * and userErrorCode (when set) is the referee / passkey-manager code. We used to print "vm error -765"
+ * for every revert, which hid the real reason and made the ticker look like the chain was on fire.
+ */
+const THRU_VM = {
+  SUCCESS: 0,
+  VM_FAILED: -767,
+  INVALID_PROGRAM: -766,
+  VM_REVERT: -765,
+  CU_EXHAUSTED: -764,
+  SU_EXHAUSTED: -763,
+  NONCE_TOO_LOW: -511,
+  NONCE_TOO_HIGH: -510,
+} as const;
+
+function describeExecution(vmError: number, userErrorCode: bigint, describe: (c: bigint) => string): string | undefined {
+  if (vmError === THRU_VM.SUCCESS && userErrorCode === 0n) return undefined;
+  if (userErrorCode !== 0n) return `reverted: ${describe(userErrorCode)}`;
+  switch (vmError) {
+    case THRU_VM.VM_REVERT:
+      return "reverted";
+    case THRU_VM.CU_EXHAUSTED:
+      return "compute units exhausted";
+    case THRU_VM.SU_EXHAUSTED:
+      return "state units exhausted";
+    case THRU_VM.VM_FAILED:
+      return "vm crashed";
+    case THRU_VM.INVALID_PROGRAM:
+      return "invalid program account";
+    case THRU_VM.NONCE_TOO_LOW:
+      return "nonce too low";
+    case THRU_VM.NONCE_TOO_HIGH:
+      return "nonce too high";
+    default:
+      return vmError ? `vm error ${vmError}` : `reverted: ${describe(userErrorCode)}`;
+  }
+}
+
+/** Retry nonce mismatches. A program revert already happened; sending it again just spam-fails. */
+function retryableExecution(vmError: number, userErrorCode: bigint): boolean {
+  if (userErrorCode !== 0n) return false;
+  return vmError === THRU_VM.NONCE_TOO_LOW || vmError === THRU_VM.NONCE_TOO_HIGH;
+}
+
 export type HostKey = { publicKey: Uint8Array; privateKey: Uint8Array; address: string };
 
 let hostKeyPromise: Promise<HostKey> | null = null;
@@ -138,7 +183,7 @@ export async function sendHostTx(opts: {
         if (u.executionResult) {
           const r = u.executionResult;
           headerCache.nonce = r.feePayerExpectedNonce ?? h.nonce + 1n;
-          const ok = r.vmError === 0 && r.userErrorCode === 0n;
+          const ok = r.vmError === THRU_VM.SUCCESS && r.userErrorCode === 0n;
           return {
             kind: opts.kind,
             ms: Math.round(performance.now() - t0),
@@ -146,9 +191,9 @@ export async function sendHostTx(opts: {
             mock: false,
             signer,
             signature,
-            explorerUrl: explorerTx(signature),
-            error: ok ? undefined : r.vmError ? `vm error ${r.vmError}` : `reverted: ${describe(r.userErrorCode)}`,
-            retryable: r.feePayerExpectedNonce !== undefined,
+            explorerUrl: ok ? explorerTx(signature) : undefined,
+            error: describeExecution(r.vmError, r.userErrorCode, describe),
+            retryable: retryableExecution(r.vmError, r.userErrorCode),
           };
         }
       }
@@ -232,7 +277,7 @@ export async function sendPasskeyTx(opts: {
         mock: false,
         signer: "passkey",
         signature: res.signature,
-        explorerUrl: explorerTx(res.signature),
+        explorerUrl: ok ? explorerTx(res.signature) : undefined,
         error: ok ? undefined : `${res.status}${res.errorCode !== undefined ? ` (${describe(BigInt(res.errorCode))})` : ""}`,
         retryable: false,
       };

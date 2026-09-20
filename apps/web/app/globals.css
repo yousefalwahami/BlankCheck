@@ -126,6 +126,29 @@ body {
   background: var(--color-ink);
   color: var(--color-bone);
   -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  cursor: default;
+}
+
+input,
+textarea,
+[contenteditable="true"] {
+  user-select: text;
+  -webkit-user-select: text;
+  cursor: text;
+}
+
+::selection {
+  background: transparent;
+  color: inherit;
+}
+
+input::selection,
+textarea::selection {
+  background: var(--color-brass);
+  color: var(--color-ink);
 }
 
 body {
@@ -206,7 +229,8 @@ body {
   -webkit-touch-callout: none;
 }
 
-button {
+button,
+a[href] {
   cursor: pointer;
 }
 button:disabled {

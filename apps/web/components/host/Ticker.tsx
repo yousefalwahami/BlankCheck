@@ -13,7 +13,10 @@ const SIGNER: Record<NonNullable<ChainTx["signer"]>, string> = {
 const SIGNED_KINDS = new Set(["PULL_TRIGGER", "ACCUSE", "BUY_IN_$"]);
 
 export function Ticker({ txs, state }: { txs: ChainTx[]; state: PublicState }) {
-  const recent = txs.slice(-5).reverse();
+  const recent = txs
+    .filter((t) => t.ok)
+    .slice(-5)
+    .reverse();
   const name = (seat?: number) => (seat === undefined ? "" : (state.seats[seat]?.name ?? `seat ${seat + 1}`));
   return (
     <div className="flex h-[7vh] min-h-12 items-center gap-4 overflow-hidden border-t border-crt/20 bg-black/70 px-4 font-crt text-[2.1vh] text-crt">
@@ -33,12 +36,11 @@ export function Ticker({ txs, state }: { txs: ChainTx[]; state: PublicState }) {
               href={t.explorerUrl}
               target="_blank"
               rel="noreferrer"
-              className={`shrink-0 whitespace-nowrap ${t.ok ? "" : "text-blood"} ${t.explorerUrl ? "hover:underline" : "pointer-events-none"}`}
+              className={`shrink-0 whitespace-nowrap ${t.explorerUrl ? "hover:underline" : "pointer-events-none"}`}
             >
-              {t.ok ? "⛓" : "✖"} {t.kind}
+              ⛓ {t.kind}
               {t.seat !== undefined ? ` · ${name(t.seat)}` : ""} · {t.ms} ms
               {t.signer && SIGNED_KINDS.has(t.kind) ? ` · ${SIGNER[t.signer]}` : ""}
-              {!t.ok && t.error ? ` · ${t.error}` : ""}
             </motion.a>
           ))}
         </AnimatePresence>

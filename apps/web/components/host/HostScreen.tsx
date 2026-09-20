@@ -14,6 +14,14 @@ import { GameTitle } from "../ui/bits";
 
 const HOST_KEY = "bc.host";
 
+/** Hold ticker rows until the TV has played the matching beat. */
+const TICKER_AFTER: Partial<Record<string, number>> = {
+  PULL_TRIGGER: TIMING.shotAnim,
+  RESOLVE_SHOT: TIMING.shotAnim,
+  ACCUSE: TIMING.riggedTheater,
+  REVEAL: TIMING.riggedTheater,
+};
+
 function loadHost(): { room: string; hostToken: string } | null {
   try {
     const raw = sessionStorage.getItem(HOST_KEY);
@@ -76,7 +84,17 @@ export function HostScreen() {
   }, []);
 
   useSocketEvent<PublicState>(S2C.state, useCallback((p) => setState(p), []));
-  useSocketEvent<ChainTx>(S2C.chainTx, useCallback((t) => setTxs((prev) => (prev.some((x) => x.id === t.id) ? prev : [...prev.slice(-40), t])), []));
+  // Only confirmed txs, and only after the matching beat (shot pop / RIGGED theater) so the ticker doesn't leak mid-scene.
+  useSocketEvent<ChainTx>(
+    S2C.chainTx,
+    useCallback((t) => {
+      if (!t.ok) return;
+      const wait = TICKER_AFTER[t.kind] ?? 0;
+      const add = () => setTxs((prev) => (prev.some((x) => x.id === t.id) ? prev : [...prev.slice(-40), t]));
+      if (wait) setTimeout(add, wait);
+      else add();
+    }, []),
+  );
   useSocketEvent<PitBossReading>(S2C.pitboss, useCallback((p) => setPit({ ...p }), []));
   const fly = useCallback((f: Omit<Flight, "id">) => {
     const id = ++flightSeq.current;
