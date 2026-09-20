@@ -170,7 +170,7 @@ export class Room {
     } catch (e) {
       console.warn(`[room ${this.code}] wallet bind failed:`, e);
       if (!this.accounts.has(this.key(s))) void this.openWallet(this.key(s), { kind: "custodial", id: `player:${s.playerId}` });
-      return { error: "Couldn't create your Face ID wallet. You can still play; the house holds your chips." };
+      return { error: "Couldn't create your passkey wallet. You can still play; the house holds your chips." };
     }
   }
 
@@ -364,7 +364,7 @@ export class Room {
         ({ challenge, prepared } = await this.bank.challengeForBuyIn(account));
       } catch (e) {
         console.warn(`[room ${this.code}] buy-in challenge failed:`, e);
-        return "Couldn't reach the bank for a Face ID challenge. Try again.";
+        return "Couldn't reach the bank for a passkey challenge. Try again.";
       }
     }
     this.challenges.set(seat, {
@@ -475,7 +475,7 @@ export class Room {
   }
 
   private async issueChallenge(seat: number, call: SeatCall) {
-    const requirePasskey = this.seatUsesPasskey(seat);
+    const requirePasskey = this.seatUsesPasskey(seat) && (call.kind !== "pullTrigger" || call.target === seat);
     const s = this.state.seats[seat];
     let challenge: string;
     let prepared: unknown = undefined;
@@ -493,7 +493,7 @@ export class Room {
       }
     } catch (e) {
       console.warn(`[room ${this.code}] challenge failed:`, e);
-      this.toast(seat, "Couldn't reach the chain for a Face ID challenge. Try again.");
+      this.toast(seat, "Couldn't reach the chain for a passkey challenge. Try again.");
       return;
     }
     const round = this.state.round;
@@ -531,7 +531,7 @@ export class Room {
   }
 
   private authFrom(ch: PendingChallenge, assertion?: PasskeyAssertion): SeatAuth | string {
-    if (ch.requirePasskey && !assertion) return "Face ID is required for this seat";
+    if (ch.requirePasskey && !assertion) return "A passkey is required for this seat";
     return assertion && ch.requirePasskey ? { type: "passkey", assertion, prepared: ch.prepared } : { type: "host" };
   }
 

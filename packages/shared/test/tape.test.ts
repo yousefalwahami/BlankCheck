@@ -4,6 +4,7 @@ import {
   computeAwards,
   envelopeHash,
   envelopesMatchShots,
+  flattenTapeEvents,
   replayRound,
   shellsHash,
   toHex,
@@ -62,35 +63,83 @@ describe("tape verification", () => {
     r.shots[2].fired = 0;
     expect(replayRound(r)[2].ok).toBe(false);
   });
+});
 
-  it("hands out awards", () => {
-    const tape: TapeData = {
-      room: "ABCD",
-      refereeMode: "mock",
-      tableKey,
-      tableAddress: null,
-      explorerUrl: "",
-      seats: [
-        { seat: 0, name: "Maya", kind: "human" },
-        { seat: 1, name: "Dev", kind: "human" },
-        { seat: 2, name: "Gary", kind: "bot", personality: "gary" },
+function tape(): TapeData {
+  return {
+    room: "ABCD",
+    refereeMode: "mock",
+    tableKey,
+    tableAddress: null,
+    explorerUrl: "",
+    seats: [
+      { seat: 0, name: "Maya", kind: "human" },
+      { seat: 1, name: "Dev", kind: "human" },
+      { seat: 2, name: "Gary", kind: "bot", personality: "gary" },
+    ],
+    winner: 1,
+    rounds: [round()],
+    money: {
+      ticker: "BCUSD",
+      bankMode: "mock",
+      results: [
+        { seat: 0, chips: 0, buyIns: 3, spentCents: 3600, cashOutCents: 0, profitCents: -3600 },
+        { seat: 1, chips: 9, buyIns: 1, spentCents: 1200, cashOutCents: 3600, profitCents: 2400 },
+        { seat: 2, chips: 3, buyIns: 1, spentCents: 1200, cashOutCents: 1200, profitCents: 0 },
       ],
-      winner: 1,
-      rounds: [round()],
-      money: {
-        ticker: "BCUSD",
-        bankMode: "mock",
-        results: [
-          { seat: 0, chips: 0, buyIns: 3, spentCents: 3600, cashOutCents: 0, profitCents: -3600 },
-          { seat: 1, chips: 9, buyIns: 1, spentCents: 1200, cashOutCents: 3600, profitCents: 2400 },
-          { seat: 2, chips: 3, buyIns: 1, spentCents: 1200, cashOutCents: 1200, profitCents: 0 },
-        ],
-        transfers: [],
-      },
-      onChainActions: 10,
-      failedTxs: 0,
-    };
-    const awards = Object.fromEntries(computeAwards(tape).map((a) => [a.id, a]));
+      transfers: [],
+    },
+    onChainActions: 10,
+    failedTxs: 0,
+  };
+}
+
+describe("flattenTapeEvents", () => {
+  const t = tape();
+  const name = (s: number) => t.seats.find((x) => x.seat === s)?.name ?? `Seat ${s + 1}`;
+
+  it("records lies, accusations, and self vs other shots", () => {
+    const events = flattenTapeEvents(t, name);
+
+    const hot = events.find((e) => e.kind === "lie" && e.search.includes("hot load"));
+    expect(hot).toMatchObject({ id: "r0-lie-0-1", caught: false, seats: [1] });
+    expect(hot!.search).toMatch(/got away/);
+
+    const swap = events.find((e) => e.kind === "lie" && e.search.includes("swap"));
+    expect(swap).toMatchObject({ id: "r0-lie-1-0", caught: true, seats: [0] });
+    expect(swap!.search).toMatch(/caught/);
+
+    const guilty = events.find((e) => e.kind === "rigged");
+    expect(guilty).toMatchObject({ verdict: "GUILTY", seats: [1, 0] });
+    expect(guilty!.search).toContain("guilty");
+
+    const shots = events.filter((e) => e.kind === "shot");
+    expect(shots).toHaveLength(3);
+    expect(shots.filter((e) => e.search.includes("themselves"))).toHaveLength(2);
+    expect(shots[0]).toMatchObject({ id: "r0-s0", committed: 0, fired: 1 });
+    expect(shots[2]).toMatchObject({ id: "r0-s2", seats: [1, 0], committed: 0, fired: 1 });
+    expect(shots[2].title).toContain("Maya");
+    expect(shots[2].search).not.toContain("themselves");
+  });
+
+  it("orders round → shots → lies → accusation → buy-in → pot", () => {
+    expect(flattenTapeEvents(t, name).map((e) => e.kind)).toEqual([
+      "round",
+      "shot",
+      "shot",
+      "shot",
+      "lie",
+      "lie",
+      "rigged",
+      "buyin",
+      "pot",
+    ]);
+  });
+});
+
+describe("awards", () => {
+  it("hands out awards", () => {
+    const awards = Object.fromEntries(computeAwards(tape()).map((a) => [a.id, a]));
     expect(awards.liar.seats).toEqual([1]);
     expect(awards.honest.seats).toEqual([2]);
     expect(awards.sharpshooter.seats).toEqual([1]);

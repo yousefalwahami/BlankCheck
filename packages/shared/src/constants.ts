@@ -20,7 +20,7 @@ export const MONEY = {
   bankrollCents: 6000,
 } as const;
 
-export const DEFAULT_ROUNDS = 5;
+export const DEFAULT_ROUNDS = 3;
 export const DEMO_ROUNDS = 3;
 export const MAX_GAME_ROUNDS = 12;
 

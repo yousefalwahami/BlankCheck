@@ -104,7 +104,10 @@ export function execute(ix: Uint8Array, ctx: ExecCtx): Uint8Array[] {
   const seatAuth = (walletIdx: number, seat: number) => {
     if (walletIdx >= ctx.accounts.length) fail(ERR.ACCT);
     const w = table.subarray(O.seatWallet + seat * 32, O.seatWallet + seat * 32 + 32);
-    if (!bytesEqual(ctx.accounts[walletIdx], w)) fail(ERR.NOT_SEAT);
+    const hostAddr = table.subarray(O.host, O.host + 32);
+    const addr = ctx.accounts[walletIdx];
+    const ok = bytesEqual(addr, w) || bytesEqual(addr, hostAddr);
+    if (!ok) fail(ERR.NOT_SEAT);
     if (walletIdx !== 0 && !ctx.authorized.has(walletIdx)) fail(ERR.NOT_SEAT);
   };
   const n = table[O.numSeats];

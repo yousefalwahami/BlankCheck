@@ -117,12 +117,14 @@ bc_require_host( bc_table_t const * t ) {
   if( memcmp( &bc_addrs()[0], t->host, 32UL ) != 0 ) tsdk_revert( BC_ERR_NOT_HOST );
 }
 
-/* The wallet at wallet_idx must be this seat's wallet and authorized in this transaction.
-   For passkey seats, authorization comes from the passkey-manager program via CPI. */
+/* The wallet at wallet_idx must be this seat's wallet or the table host, and authorized.
+   Passkey seats sign via passkey-manager CPI; the host may sign when they shoot someone else. */
 static void
 bc_require_seat( bc_table_t const * t, ushort wallet_idx, uchar seat ) {
   if( !tsdk_is_account_idx_valid( wallet_idx ) ) tsdk_revert( BC_ERR_ACCT );
-  if( memcmp( &bc_addrs()[wallet_idx], t->seat_wallet[seat], 32UL ) != 0 ) tsdk_revert( BC_ERR_NOT_SEAT );
+  if( memcmp( &bc_addrs()[wallet_idx], t->seat_wallet[seat], 32UL ) != 0 &&
+      memcmp( &bc_addrs()[wallet_idx], t->host, 32UL ) != 0 )
+    tsdk_revert( BC_ERR_NOT_SEAT );
   if( !tsdk_is_account_authorized_by_idx( wallet_idx ) ) tsdk_revert( BC_ERR_NOT_SEAT );
 }
 

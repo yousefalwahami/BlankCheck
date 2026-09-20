@@ -8,7 +8,7 @@ const specialElite = Special_Elite({ weight: "400", subsets: ["latin"], variable
 
 export const metadata: Metadata = {
   title: "Gambit Rodeo",
-  description: "Everyone cheats. The chain remembers. A party game with Face ID pops, chips, and a C referee on Thru.",
+  description: "Everyone cheats. The chain remembers. A party game with passkey pops, chips, and a C referee on Thru.",
 };
 
 export const viewport: Viewport = {

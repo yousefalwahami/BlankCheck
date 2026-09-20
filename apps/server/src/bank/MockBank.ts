@@ -46,7 +46,7 @@ export class MockBank implements Bank {
     if (passkey) {
       const prep = auth.type === "passkey" ? (auth.prepared as { challenge: string; publicKey?: string } | undefined) : undefined;
       const ok = auth.type === "passkey" && !!prep?.publicKey && (await verifyPasskeyAssertion(prep.publicKey, prep.challenge, auth.assertion));
-      if (!ok) return this.receipt("BUY_IN_$", false, "passkey", "Face ID signature didn't check out");
+      if (!ok) return this.receipt("BUY_IN_$", false, "passkey", "Passkey signature didn't check out");
     }
     const bal = this.balances.get(account.address) ?? 0;
     if (bal < MONEY.buyInCents) return this.receipt("BUY_IN_$", false, passkey ? "passkey" : "house", `only ${dollars(bal)} in the wallet`);

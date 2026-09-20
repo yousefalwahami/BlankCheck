@@ -143,7 +143,7 @@ export class ThruBank implements Bank {
   async buyIn(account: BankAccount, auth: SeatAuth): Promise<Receipt> {
     if (account.ref.kind === "custodial") return this.transfer("BUY_IN_$", account, this.cashier(), MONEY.buyInCents, "house");
     const prep = auth.type === "passkey" ? (auth.prepared as { accountCtx: AccountContext; instructionData: Uint8Array } | null) : null;
-    if (auth.type !== "passkey" || !prep) return { kind: "BUY_IN_$", ms: 0, ok: false, mock: false, signer: "passkey", error: "Face ID signature missing" };
+    if (auth.type !== "passkey" || !prep) return { kind: "BUY_IN_$", ms: 0, ok: false, mock: false, signer: "passkey", error: "passkey signature missing" };
     return sendPasskeyTx({
       kind: "BUY_IN_$",
       wallet: account.ref.wallet,

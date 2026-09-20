@@ -182,19 +182,22 @@ export class ThruReferee implements Referee {
     const wallet = t.wallets[seat];
     const kind = call.kind === "pullTrigger" ? "PULL_TRIGGER" : "ACCUSE";
 
-    // Bots and house-signed seats: the house key is the seat wallet (fee payer = index 0).
-    if (!wallet || wallet === hostAddressSync()) {
-      return this.host(
+    const hostIx = (signer: Receipt["signer"]) =>
+      this.host(
         kind,
         (ctx) =>
           call.kind === "pullTrigger"
             ? encPullTrigger({ tableIdx: ctx.getAccountIndex(t.address), walletIdx: 0, round: call.round, shot: call.shot, shooter: call.shooter, target: call.target })
             : encAccuse({ tableIdx: ctx.getAccountIndex(t.address), walletIdx: 0, round: call.round, accuser: call.accuser, accused: call.accused }),
-        "house",
+        signer,
       );
-    }
 
-    if (call.auth.type !== "passkey") return { kind, ms: 0, ok: false, mock: false, signer: "passkey", error: "Face ID signature missing", retryable: false };
+    // Bots and house-held seats: the house key is the seat wallet (fee payer = index 0).
+    if (!wallet || wallet === hostAddressSync()) return hostIx("house");
+    // Passkey seat shooting someone else (or any host-authorized call): host signs, no WebAuthn.
+    if (call.auth.type === "host") return hostIx("host");
+
+    if (call.auth.type !== "passkey") return { kind, ms: 0, ok: false, mock: false, signer: "passkey", error: "passkey signature missing", retryable: false };
     const prep = call.auth.prepared as { accountCtx: AccountContext; instructionData: Uint8Array } | undefined;
     if (!prep) return { kind, ms: 0, ok: false, mock: false, signer: "passkey", error: "no prepared challenge", retryable: false };
     return sendPasskeyTx({

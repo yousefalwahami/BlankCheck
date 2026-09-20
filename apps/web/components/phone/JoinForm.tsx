@@ -55,9 +55,9 @@ export function JoinForm() {
     setBusy(true);
     try {
       if (passkey) {
-        await signChallenge(passkey.credentialId, randomChallenge()); // Face ID unlocks your wallet
+        await signChallenge(passkey.credentialId, randomChallenge()); // passkey unlocks your wallet
       } else {
-        setPasskey(await createPasskey(name.trim())); // Face ID creates your wallet
+        setPasskey(await createPasskey(name.trim())); // passkey creates your wallet
       }
       go();
     } catch (e) {
@@ -67,7 +67,7 @@ export function JoinForm() {
   };
 
   return (
-    <main className="room-bg crt flex min-h-dvh flex-col items-center justify-center px-5 py-10">
+    <main className="room-bg crt flex min-h-dvh flex-col items-center justify-start px-5 py-8 sm:justify-center">
       <div className="grain" />
       <div className="w-full max-w-sm">
         <h1 className="text-center font-display text-6xl leading-none">
@@ -113,9 +113,9 @@ export function JoinForm() {
         <p className="mt-4 text-center font-crt text-lg leading-tight text-ash">
           {canPasskey
             ? passkey
-              ? "Face ID unlocks your wallet. Same face, same wallet."
-              : "Face ID creates your wallet. No app, no seed phrase."
-            : "Face ID needs HTTPS. On this connection you'll tap to pop instead."}
+              ? "Your passkey unlocks your wallet. Same phone, same wallet."
+              : "A passkey creates your wallet. No app, no seed phrase."
+            : "Passkeys need HTTPS. On this connection you'll tap to pop instead."}
         </p>
         {error && (
           <div className="mt-4 rounded-xl border border-blood bg-blood/10 p-3 text-center font-crt text-lg text-blood">

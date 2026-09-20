@@ -4,7 +4,7 @@ import type { PasskeyAssertion } from "@blankcheck/shared";
 import { isWebAuthnSupported, registerPasskey, signWithPasskey } from "@thru/passkey/web";
 
 /*
- * Face ID = the player's wallet (spec §7.3). The phone creates a P-256 passkey once per domain,
+ * Passkey = the player's wallet (spec §7.3). The phone creates a P-256 passkey once per domain,
  * then signs Thru passkey-manager challenges with it. Passkeys only work on HTTPS with a real
  * domain (or localhost), so on plain-HTTP LAN dev we fall back to a tap.
  */
@@ -46,7 +46,7 @@ export function forgetPasskey() {
   }
 }
 
-/** First sit-down: Face ID creates the passkey (and, server-side, the on-chain wallet). */
+/** First sit-down: a passkey creates the credential (and, server-side, the on-chain wallet). */
 export async function createPasskey(name: string): Promise<StoredPasskey> {
   const userId = `bc-${crypto.randomUUID()}`;
   const r = await registerPasskey(`${name} · Gambit Rodeo`, userId, location.hostname);
@@ -63,7 +63,7 @@ const bytesToB64 = (b: Uint8Array) => btoa(String.fromCharCode(...b));
 const bytesToHex = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
 
 /**
- * Sign a server challenge with Face ID. Call this DIRECTLY from the tap handler, with no awaits
+ * Sign a server challenge with a passkey. Call this DIRECTLY from the tap handler, with no awaits
  * before it: iOS Safari rejects WebAuthn prompts that aren't tied to a user gesture.
  */
 export async function signChallenge(credentialId: string, challengeB64Url: string): Promise<PasskeyAssertion> {
@@ -78,8 +78,8 @@ export async function signChallenge(credentialId: string, challengeB64Url: strin
 
 export function describePasskeyError(e: unknown): string {
   const name = e instanceof Error ? e.name : "";
-  if (name === "NotAllowedError") return "Face ID was cancelled (or timed out).";
+  if (name === "NotAllowedError") return "Passkey was cancelled (or timed out).";
   if (name === "SecurityError") return "Passkeys need HTTPS on a real domain.";
   if (name === "InvalidStateError") return "This passkey already exists on this device.";
-  return e instanceof Error ? e.message : "Face ID failed.";
+  return e instanceof Error ? e.message : "Passkey failed.";
 }

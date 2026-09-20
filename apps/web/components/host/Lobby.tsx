@@ -1,6 +1,6 @@
 "use client";
 
-import { BOTS, BOT_IDS, DEFAULT_ROUNDS, DEMO_ROUNDS, MAX_SEATS, MONEY, dollars, type BotId, type PublicState } from "@blankcheck/shared";
+import { BOTS, BOT_IDS, DEFAULT_ROUNDS, MAX_SEATS, MONEY, dollars, type BotId, type PublicState } from "@blankcheck/shared";
 import { AnimatePresence, motion } from "motion/react";
 import { QRCodeSVG } from "qrcode.react";
 import { Avatar, Chips, GameTitle } from "../ui/bits";
@@ -60,7 +60,7 @@ export function Lobby(props: {
                   <div className="min-w-0 flex-1">
                     <p className="truncate font-display text-[2.8vh] tracking-wide">{s.name}</p>
                     <p className="truncate font-crt text-[1.9vh] text-ash">
-                      {s.kind === "bot" ? `🤖 ${BOTS[s.personality!].tagline}` : s.walletReady ? "🔐 Face ID wallet" : s.connected ? "🎩 house-held wallet" : "📵 disconnected"}
+                      {s.kind === "bot" ? `🤖 ${BOTS[s.personality!].tagline}` : s.walletReady ? "🔐 passkey wallet" : s.connected ? "🎩 house-held wallet" : "📵 disconnected"}
                     </p>
                     <p className="font-crt text-[1.9vh]">
                       {s.chips > 0 ? (
@@ -108,13 +108,13 @@ export function Lobby(props: {
 
         <div className="flex flex-wrap items-center gap-[2vh] font-crt text-[2.3vh]">
           <span className="text-ash">ROUNDS</span>
-          {[DEMO_ROUNDS, DEFAULT_ROUNDS, 8].map((r) => (
+          {[DEFAULT_ROUNDS, 5, 8].map((r) => (
             <button
               key={r}
               onClick={() => props.onConfig({ rounds: r })}
               className={`rounded-lg border px-3 py-1 ${state.config.rounds === r ? "border-blood bg-blood/20 text-bone" : "border-bone/15 text-ash"}`}
             >
-              {r} {r === DEMO_ROUNDS ? "demo" : ""}
+              {r}
             </button>
           ))}
           <label className="ml-auto flex cursor-pointer items-center gap-2 text-ash">
@@ -124,7 +124,7 @@ export function Lobby(props: {
               checked={state.config.faceIdOnTrigger}
               onChange={(e) => props.onConfig({ faceIdOnTrigger: e.target.checked })}
             />
-            Face ID on pop
+            Passkey on self-pop
           </label>
         </div>
 

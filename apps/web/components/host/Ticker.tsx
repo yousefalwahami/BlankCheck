@@ -4,7 +4,7 @@ import type { ChainTx, PublicState } from "@blankcheck/shared";
 import { AnimatePresence, motion } from "motion/react";
 
 const SIGNER: Record<NonNullable<ChainTx["signer"]>, string> = {
-  passkey: "🔐 Face ID",
+  passkey: "🔐 passkey",
   house: "🤖 house key",
   host: "🎩 host",
 };

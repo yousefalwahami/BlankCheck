@@ -303,7 +303,7 @@ export function Table(props: {
             <div className="flex h-[3vh] items-center gap-2 font-crt text-[1.8vh]">
               {busted && <span className="stamp -rotate-6 border-[3px] px-1 text-[2vh] text-blood">BUSTED</span>}
               {!s.connected && s.kind === "human" && <span className="text-ash">📵</span>}
-              {s.walletReady && s.kind === "human" && <span title="Face ID wallet">🔐</span>}
+              {s.walletReady && s.kind === "human" && <span title="passkey wallet">🔐</span>}
               {s.bankrollCents !== null && <span className="text-ash" title="Left in their wallet">{dollars(s.bankrollCents)}</span>}
               {state.accuseUsed.includes(s.seat) && !busted && <span className="text-ash">called it</span>}
             </div>

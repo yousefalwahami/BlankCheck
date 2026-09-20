@@ -105,14 +105,12 @@ export class MockReferee implements Referee {
         const wallet = t.wallets[seat];
         let walletIdx = 0;
         let signer: Receipt["signer"] = "house";
-        if (wallet && toHex(wallet) !== toHex(this.host)) {
+        if (call.auth.type === "passkey" && wallet && toHex(wallet) !== toHex(this.host)) {
           accounts.push(wallet);
           walletIdx = 3;
           signer = "passkey";
-          if (call.auth.type === "passkey") {
-            const prep = call.auth.prepared as { challenge: string; publicKey?: string } | undefined;
-            if (prep?.publicKey && (await verifyPasskeyAssertion(prep.publicKey, prep.challenge, call.auth.assertion))) authorized.add(3);
-          }
+          const prep = call.auth.prepared as { challenge: string; publicKey?: string } | undefined;
+          if (prep?.publicKey && (await verifyPasskeyAssertion(prep.publicKey, prep.challenge, call.auth.assertion))) authorized.add(3);
         }
         const ix =
           call.kind === "pullTrigger"

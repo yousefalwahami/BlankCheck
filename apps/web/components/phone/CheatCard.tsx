@@ -7,7 +7,7 @@ import { sfx, unlockAudio } from "@/lib/sounds";
 
 /**
  * The secret card: face down. Press and hold to peek (so your neighbour can't see), swipe up while
- * holding to play it. No Face ID here: raising your phone to your face would give you away.
+ * holding to play it. No passkey here: raising your phone to your face would give you away.
  */
 export function CheatCard(props: { card: CheatCode | null; used: boolean; playedOn: number | null; canCheat: boolean; onPlay: () => void }) {
   const [holding, setHolding] = useState(false);

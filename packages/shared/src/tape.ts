@@ -154,3 +154,197 @@ export function describeCheat(cheat: number, shell: number): string {
   if (!info || cheat === Cheat.NONE) return "nothing";
   return `${info.emoji} ${info.name}${shell !== 0xff ? ` on shell #${shell + 1}` : ""}`;
 }
+
+export type TapeLedgerKind = "round" | "shot" | "lie" | "rigged" | "buyin" | "pot";
+
+export type TapeLedgerEvent = {
+  id: string;
+  kind: TapeLedgerKind;
+  round: number;
+  window?: number;
+  shot?: number;
+  seats: number[];
+  title: string;
+  detail: string;
+  search: string;
+  caught?: boolean;
+  verdict?: "GUILTY" | "INNOCENT";
+  committed?: 0 | 1;
+  fired?: 0 | 1;
+  tx?: string;
+};
+
+function shellWord(v: 0 | 1): "LIVE" | "BLANK" {
+  return v === 1 ? "LIVE" : "BLANK";
+}
+
+function uniqSeats(seats: number[]): number[] {
+  return [...new Set(seats)];
+}
+
+function haystack(parts: Array<string | number | undefined | null>): string {
+  return parts
+    .filter((p) => p !== undefined && p !== null && p !== "")
+    .join(" ")
+    .toLowerCase();
+}
+
+/** Flatten every sealed round, shot, lie, accusation, buy-in, and pot into a searchable ledger. */
+export function flattenTapeEvents(tape: TapeData, name: (seat: number) => string): TapeLedgerEvent[] {
+  const out: TapeLedgerEvent[] = [];
+  for (const r of tape.rounds) {
+    const rn = r.round + 1;
+    out.push({
+      id: `r${r.round}`,
+      kind: "round",
+      round: r.round,
+      seats: [r.firstSeat],
+      title: `ROUND ${rn} SEALED`,
+      detail: `${r.announced.live} LIVE · ${r.announced.blank} BLANK`,
+      search: haystack([
+        "round",
+        rn,
+        r.round,
+        "sealed",
+        name(r.firstSeat),
+        r.announced.live,
+        "live",
+        r.announced.blank,
+        "blank",
+        r.commit.slice(0, 16),
+        r.commit,
+        r.commitTx,
+        r.revealShellsTx,
+      ]),
+      tx: r.revealShellsTx ?? r.commitTx,
+    });
+
+    for (const s of r.shots) {
+      const self = s.shooter === s.target;
+      const targetLabel = self ? "THEMSELVES" : name(s.target);
+      const cheatNames = s.cheats.map((c) => CHEAT_INFO[c.cheat]?.name ?? String(c.cheat));
+      const cheatLine = s.cheats.map((c) => `${name(c.seat)} ${CHEAT_INFO[c.cheat]?.name ?? c.cheat}`).join(", ");
+      const committed = shellWord(s.committed);
+      const fired = shellWord(s.fired);
+      const tampered = s.committed !== s.fired || s.cheats.length > 0;
+      out.push({
+        id: `r${r.round}-s${s.shot}`,
+        kind: "shot",
+        round: r.round,
+        window: s.window,
+        shot: s.shot,
+        seats: uniqSeats([s.shooter, s.target, ...s.cheats.map((c) => c.seat)]),
+        title: `${name(s.shooter)} → ${targetLabel}`,
+        detail: [
+          `sealed ${committed} · fired ${fired}`,
+          tampered ? "tampered" : null,
+          cheatLine || null,
+          `${(s.hesitationMs / 1000).toFixed(1)}s hesitation`,
+        ]
+          .filter(Boolean)
+          .join(" · "),
+        search: haystack([
+          "shot",
+          "round",
+          rn,
+          r.round,
+          name(s.shooter),
+          targetLabel,
+          self ? "themselves" : name(s.target),
+          committed,
+          fired,
+          cheatLine,
+          ...cheatNames,
+          tampered ? "tampered" : "",
+          s.triggerTx,
+          s.resolveTx,
+        ]),
+        committed: s.committed,
+        fired: s.fired,
+        tx: s.resolveTx ?? s.triggerTx,
+      });
+    }
+
+    for (const e of r.envelopes) {
+      if (e.cheat === Cheat.NONE) continue;
+      const info = CHEAT_INFO[e.cheat];
+      const cheatName = info?.name ?? String(e.cheat);
+      const stamp = e.caught ? "CAUGHT" : "GOT AWAY WITH IT";
+      out.push({
+        id: `r${r.round}-lie-${e.window}-${e.seat}`,
+        kind: "lie",
+        round: r.round,
+        window: e.window,
+        seats: [e.seat],
+        title: `${name(e.seat)} played ${cheatName}`,
+        detail: `${describeCheat(e.cheat, e.shell)} · ${stamp}`,
+        search: haystack([
+          "lie",
+          "cheat",
+          "round",
+          rn,
+          r.round,
+          name(e.seat),
+          cheatName,
+          info?.key,
+          e.caught ? "caught" : "got away",
+          stamp,
+          e.hash.slice(0, 16),
+          e.hash,
+          e.sealTx,
+          e.revealTx,
+          `shell ${e.shell + 1}`,
+        ]),
+        caught: e.caught,
+        tx: e.revealTx ?? e.sealTx,
+      });
+    }
+
+    for (const [i, a] of r.accusations.entries()) {
+      out.push({
+        id: `r${r.round}-rigged-${a.window}-${a.accuser}-${i}`,
+        kind: "rigged",
+        round: r.round,
+        window: a.window,
+        seats: uniqSeats([a.accuser, a.accused]),
+        title: `${name(a.accuser)} called RIGGED on ${name(a.accused)}`,
+        detail: `${a.verdict} · ${a.chipsMoved} chip${a.chipsMoved === 1 ? "" : "s"}`,
+        search: haystack(["rigged", "accusation", "round", rn, r.round, name(a.accuser), name(a.accused), a.verdict, a.tx]),
+        verdict: a.verdict,
+        tx: a.tx,
+      });
+    }
+
+    for (const [i, b] of r.buyIns.entries()) {
+      out.push({
+        id: `r${r.round}-buyin-${b.seat}-${i}`,
+        kind: "buyin",
+        round: r.round,
+        seats: [b.seat],
+        title: `${name(b.seat)} bought back in`,
+        detail: "buy-in",
+        search: haystack(["buyin", "buy-in", "buy in", "round", rn, r.round, name(b.seat), b.tx]),
+        tx: b.tx,
+      });
+    }
+
+    if (r.pot) {
+      const who = r.pot.winners.length ? r.pot.winners.map(name).join(" & ") : "nobody";
+      out.push({
+        id: `r${r.round}-pot`,
+        kind: "pot",
+        round: r.round,
+        seats: [...r.pot.winners],
+        title: r.pot.winners.length ? `POT → ${who}` : "POT EMPTY",
+        detail: r.pot.winners.length
+          ? `${r.pot.chipsEach} chip${r.pot.chipsEach === 1 ? "" : "s"} each${r.pot.carried ? ` · ${r.pot.carried} carried` : ""}`
+          : r.pot.carried
+            ? `${r.pot.carried} carried`
+            : "empty",
+        search: haystack(["pot", "round", rn, r.round, who, r.pot.tx]),
+        tx: r.pot.tx,
+      });
+    }
+  }
+  return out;
+}

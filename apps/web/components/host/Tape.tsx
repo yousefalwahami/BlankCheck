@@ -6,13 +6,17 @@ import {
   MONEY,
   dollars,
   computeAwards,
+  flattenTapeEvents,
   replayRound,
   verifyTapeEnvelope,
   verifyTapeShells,
   type PublicState,
   type TapeData,
   type TapeEnvelope,
+  type TapeLedgerEvent,
+  type TapeLedgerKind,
   type TapeRound,
+  type TapeShot,
 } from "@blankcheck/shared";
 import { AnimatePresence, motion } from "motion/react";
 import { QRCodeSVG } from "qrcode.react";
@@ -24,12 +28,15 @@ import { useChainCheck } from "./useChainCheck";
 type Slide =
   | { kind: "intro" }
   | { kind: "round"; round: TapeRound }
+  | { kind: "shot"; round: TapeRound; shot: TapeShot }
   | { kind: "cheat"; round: TapeRound; env: TapeEnvelope }
   | { kind: "money" }
   | { kind: "awards" }
   | { kind: "final" };
 
-const DURATION: Record<Slide["kind"], number> = { intro: 4000, round: 5500, cheat: 4500, money: 8000, awards: 12000, final: 0 };
+const DURATION: Record<Slide["kind"], number> = { intro: 4000, round: 5500, shot: 4000, cheat: 4500, money: 8000, awards: 12000, final: 0 };
+
+type LedgerChip = "all" | "lies" | "gotaway" | "caught" | "shots" | "rigged";
 
 export function TapeView({ tape, state, onRestart }: { tape: TapeData; state: PublicState; onRestart: () => void }) {
   const chain = useChainCheck(tape);
@@ -51,32 +58,52 @@ export function TapeView({ tape, state, onRestart }: { tape: TapeData; state: Pu
     const out: Slide[] = [{ kind: "intro" }];
     for (const r of tape.rounds) {
       out.push({ kind: "round", round: r });
+      for (const s of r.shots) out.push({ kind: "shot", round: r, shot: s });
       for (const e of r.envelopes) if (e.cheat !== Cheat.NONE) out.push({ kind: "cheat", round: r, env: e });
     }
     out.push({ kind: "money" }, { kind: "awards" }, { kind: "final" });
     return out;
   }, [tape]);
 
+  const events = useMemo(
+    () => flattenTapeEvents(tape, (n) => tape.seats.find((s) => s.seat === n)?.name ?? `Seat ${n + 1}`),
+    [tape],
+  );
+
   const [i, setI] = useState(0);
   const [paused, setPaused] = useState(false);
+  const [mode, setMode] = useState<"play" | "ledger">("play");
+  const [query, setQuery] = useState("");
+  const [chip, setChip] = useState<LedgerChip>("all");
   const slide = slides[Math.min(i, slides.length - 1)];
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return events.filter((e) => matchLedgerChip(e, chip) && (!q || e.search.includes(q)));
+  }, [events, query, chip]);
 
   useEffect(() => {
     const d = DURATION[slide.kind];
-    if (!d || paused) return;
+    if (!d || paused || mode === "ledger") return;
     const t = setTimeout(() => setI((x) => Math.min(x + 1, slides.length - 1)), d);
     return () => clearTimeout(t);
-  }, [slide, paused, slides.length]);
+  }, [slide, paused, slides.length, mode]);
 
   useEffect(() => {
     if (slide.kind === "cheat") setTimeout(() => sfx.stamp(), 900);
+    if (slide.kind === "shot" && slide.shot.cheats.length) setTimeout(() => sfx.stamp(), 900);
   }, [slide]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      const typing = e.target instanceof HTMLElement && (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA");
+      if (typing) return;
       if (e.key === "ArrowRight") setI((x) => Math.min(x + 1, slides.length - 1));
       if (e.key === "ArrowLeft") setI((x) => Math.max(0, x - 1));
-      if (e.key === " ") setPaused((p) => !p);
+      if (e.key === " ") {
+        e.preventDefault();
+        setPaused((p) => !p);
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -88,18 +115,52 @@ export function TapeView({ tape, state, onRestart }: { tape: TapeData; state: Pu
   const totalCheats = tape.rounds.flatMap((r) => r.envelopes).filter((e) => e.cheat !== Cheat.NONE);
   const escaped = totalCheats.filter((e) => !e.caught).length;
 
+  const jumpTo = (e: TapeLedgerEvent) => {
+    const idx = slideIndexForEvent(slides, e);
+    if (idx >= 0) setI(idx);
+    setMode("play");
+    setPaused(true);
+  };
+
   return (
     <div className="vhs relative flex h-full flex-col overflow-hidden">
-      <div className="absolute left-[2vw] top-[2vh] z-10 font-crt text-[4vh] text-bone vhs-text">
-        {i === 0 ? "◀◀ REW" : paused ? "❚❚ PAUSE" : "▶ PLAY"}
+      <div className="absolute left-[2vw] top-[2vh] z-20 flex items-center gap-4" onClick={(e) => e.stopPropagation()}>
+        <div className="flex overflow-hidden rounded border border-bone/30 font-crt text-[2.2vh] tracking-widest">
+          <button
+            type="button"
+            className={`px-3 py-1 ${mode === "play" ? "bg-bone text-ink" : "text-bone/70"}`}
+            onClick={() => {
+              setMode("play");
+              setPaused(false);
+            }}
+          >
+            PLAY
+          </button>
+          <button
+            type="button"
+            className={`px-3 py-1 ${mode === "ledger" ? "bg-bone text-ink" : "text-bone/70"}`}
+            onClick={() => {
+              setMode("ledger");
+              setPaused(true);
+            }}
+          >
+            LEDGER
+          </button>
+        </div>
+        <span className="font-crt text-[4vh] text-bone vhs-text">
+          {mode === "ledger" ? "☰ LEDGER" : i === 0 ? "◀◀ REW" : paused ? "❚❚ PAUSE" : "▶ PLAY"}
+        </span>
       </div>
       <div className="absolute right-[2vw] top-[2vh] z-10 text-right font-crt text-[2.6vh] text-bone/80 vhs-text">
         TAPE #{tape.room}
         <br />
         {chain ? <span className={chain.ok ? "text-crt" : "text-blood"}>{chain.label}</span> : `✓ ${verified.ok}/${verified.total} envelopes re-hashed`}
       </div>
-      <VhsClock />
+      {mode === "play" && <VhsClock />}
 
+      {mode === "ledger" ? (
+        <TapeLedger events={filtered} query={query} onQuery={setQuery} chip={chip} onChip={setChip} tx={tx} onJump={jumpTo} />
+      ) : (
       <div className="relative z-0 flex flex-1 items-center justify-center px-[5vw]" onClick={() => setI((x) => Math.min(x + 1, slides.length - 1))}>
         <AnimatePresence mode="wait">
           <motion.div
@@ -125,6 +186,17 @@ export function TapeView({ tape, state, onRestart }: { tape: TapeData; state: Pu
 
             {slide.kind === "round" && (
               <RoundSlide r={slide.round} name={name} verified={verified.shells.get(slide.round.round)!} replayOk={verified.replay.get(slide.round.round)!} link={tx(slide.round.revealShellsTx)} tx={tx} />
+            )}
+
+            {slide.kind === "shot" && (
+              <ShotSlide
+                r={slide.round}
+                shot={slide.shot}
+                name={name}
+                envOk={verified.env}
+                replayOk={verified.replay.get(slide.round.round)!}
+                tx={tx}
+              />
             )}
 
             {slide.kind === "money" && <MoneySlide tape={tape} name={name} seat={seat} />}
@@ -196,10 +268,13 @@ export function TapeView({ tape, state, onRestart }: { tape: TapeData; state: Pu
           </motion.div>
         </AnimatePresence>
       </div>
+      )}
 
       <div className="z-10 flex items-center justify-between px-[2vw] pb-[2vh] font-crt text-[2.2vh] text-ash">
         <span>
-          {i + 1}/{slides.length} · ← → to scrub · space to pause
+          {mode === "ledger"
+            ? `LEDGER · ${events.length} events${filtered.length !== events.length ? ` · ${filtered.length} match` : ""}`
+            : `${i + 1}/${slides.length} · ← → to scrub · space to pause`}
         </span>
         <span>{state.seats.length} players · winner {name(tape.winner)}</span>
       </div>
@@ -280,6 +355,220 @@ function RoundSlide({
         ))}
       </div>
       <Verified ok={verified && replayOk && r.shellsOk !== false} detail={replayOk ? "sealed order + revealed cheats reproduce every shot" : "shots don't match the sealed order!"} links={[["revealed", link]]} />
+    </div>
+  );
+}
+
+function envelopesForShot(r: TapeRound, shot: TapeShot): TapeEnvelope[] {
+  return shot.cheats
+    .map((c) => r.envelopes.find((e) => e.seat === c.seat && e.cheat === c.cheat && (e.shell === shot.shellIndex || e.window === shot.window)))
+    .filter((e): e is TapeEnvelope => !!e);
+}
+
+function ShotSlide({
+  r,
+  shot,
+  name,
+  envOk,
+  replayOk,
+  tx,
+}: {
+  r: TapeRound;
+  shot: TapeShot;
+  name: (n: number) => string;
+  envOk: Map<string, boolean>;
+  replayOk: boolean;
+  tx: (sig?: string) => string | undefined;
+}) {
+  const tampered = shot.committed !== shot.fired || shot.cheats.length > 0;
+  const targetLabel = shot.shooter === shot.target ? "THEMSELVES" : name(shot.target);
+  const matching = envelopesForShot(r, shot);
+  const thisShot = replayRound(r).find((x) => x.shot === shot.shot);
+  const hashesOk = matching.every((e) => envOk.get(`${r.round}:${e.window}:${e.seat}`) !== false);
+  return (
+    <div className="flex flex-col items-center gap-[2.5vh]">
+      <p className="font-crt text-[3vh] tracking-[0.3em] text-ash">
+        ROUND {r.round + 1} · SHOT {shot.shot + 1}
+      </p>
+      <h3 className="font-display text-[8vh] leading-none vhs-text">
+        {name(shot.shooter)} → {targetLabel}
+      </h3>
+      <div className="flex items-end gap-[4vw]">
+        <div className="flex flex-col items-center gap-2">
+          <p className="font-crt text-[2.4vh] text-ash">SEALED</p>
+          <Shell live={shot.committed === 1} size={110} highlight={tampered} />
+        </div>
+        <p className="mb-[4vh] font-display text-[6vh] text-ash">→</p>
+        <div className="flex flex-col items-center gap-2">
+          <p className="font-crt text-[2.4vh] text-ash">FIRED</p>
+          <Shell live={shot.fired === 1} size={110} highlight={tampered} />
+        </div>
+      </div>
+      {shot.cheats.map((c, i) => (
+        <p key={i} className="font-type text-[3.4vh]">
+          LIE: {name(c.seat)} played {CHEAT_INFO[c.cheat].emoji} {CHEAT_INFO[c.cheat].name}
+        </p>
+      ))}
+      {matching.map((e, i) => (
+        <motion.p
+          key={`${e.window}-${e.seat}-${i}`}
+          initial={{ scale: 1.8, opacity: 0, rotate: -18 }}
+          animate={{ scale: 1, opacity: 1, rotate: -6 }}
+          transition={{ delay: 0.8, type: "spring", stiffness: 280, damping: 14 }}
+          className={`stamp whitespace-nowrap text-[7vh] leading-none ${e.caught ? "text-crt" : "text-blood"}`}
+        >
+          {e.caught ? "CAUGHT" : "GOT AWAY WITH IT"}
+        </motion.p>
+      ))}
+      <Verified
+        ok={replayOk && (thisShot?.ok ?? true) && hashesOk && r.shellsOk !== false}
+        detail={tampered ? "sealed shell ≠ what fired — a lie touched this chamber" : "sealed shell matches what fired"}
+        links={[
+          ["trigger", tx(shot.triggerTx)],
+          ["resolve", tx(shot.resolveTx)],
+        ]}
+      />
+    </div>
+  );
+}
+
+function matchLedgerChip(e: TapeLedgerEvent, chip: LedgerChip): boolean {
+  if (chip === "all") return true;
+  if (chip === "lies") return e.kind === "lie";
+  if (chip === "gotaway") return e.kind === "lie" && e.caught === false;
+  if (chip === "caught") return e.kind === "lie" && e.caught === true;
+  if (chip === "shots") return e.kind === "shot";
+  if (chip === "rigged") return e.kind === "rigged";
+  return true;
+}
+
+function slideIndexForEvent(slides: Slide[], e: TapeLedgerEvent): number {
+  return slides.findIndex((s) => {
+    if (e.kind === "round" || e.kind === "rigged" || e.kind === "buyin" || e.kind === "pot") {
+      return s.kind === "round" && s.round.round === e.round;
+    }
+    if (e.kind === "shot") return s.kind === "shot" && s.round.round === e.round && s.shot.shot === e.shot;
+    if (e.kind === "lie") {
+      return s.kind === "cheat" && s.round.round === e.round && s.env.window === e.window && e.seats.includes(s.env.seat);
+    }
+    return false;
+  });
+}
+
+const KIND_GLYPH: Record<TapeLedgerKind, string> = {
+  round: "⏺",
+  shot: "💥",
+  lie: "🤥",
+  rigged: "🚨",
+  buyin: "💵",
+  pot: "🏦",
+};
+
+const LEDGER_CHIPS: { id: LedgerChip; label: string }[] = [
+  { id: "all", label: "ALL" },
+  { id: "lies", label: "LIES" },
+  { id: "gotaway", label: "GOT AWAY" },
+  { id: "caught", label: "CAUGHT" },
+  { id: "shots", label: "SHOTS" },
+  { id: "rigged", label: "RIGGED" },
+];
+
+function TapeLedger({
+  events,
+  query,
+  onQuery,
+  chip,
+  onChip,
+  tx,
+  onJump,
+}: {
+  events: TapeLedgerEvent[];
+  query: string;
+  onQuery: (q: string) => void;
+  chip: LedgerChip;
+  onChip: (c: LedgerChip) => void;
+  tx: (sig?: string) => string | undefined;
+  onJump: (e: TapeLedgerEvent) => void;
+}) {
+  return (
+    <div className="relative z-0 flex min-h-0 flex-1 flex-col px-[4vw] pt-[11vh]" onClick={(e) => e.stopPropagation()}>
+      <input
+        value={query}
+        onChange={(e) => onQuery(e.target.value)}
+        onClick={(e) => e.stopPropagation()}
+        placeholder="SEARCH THE TAPE — names, cheats, got away, guilty, live, hash…"
+        autoFocus
+        className="w-full rounded-lg border border-bone/20 bg-black/50 px-4 py-2 font-crt text-[2.4vh] text-bone outline-none placeholder:text-ash"
+      />
+      <div className="mt-3 flex flex-wrap gap-2">
+        {LEDGER_CHIPS.map((c) => (
+          <button
+            key={c.id}
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onChip(c.id);
+            }}
+            className={`rounded-full border px-3 py-1 font-crt text-[2vh] tracking-widest ${
+              chip === c.id ? "border-bone bg-bone text-ink" : "border-bone/30 text-bone/70"
+            }`}
+          >
+            {c.label}
+          </button>
+        ))}
+      </div>
+      <div className="mt-3 min-h-0 flex-1 overflow-y-auto pb-[4vh]">
+        {events.length === 0 && <p className="py-8 text-center font-crt text-[2.6vh] text-ash">NO HITS ON THIS TAPE</p>}
+        {events.map((e) => {
+          const href = tx(e.tx);
+          return (
+            <div
+              key={e.id}
+              role="button"
+              tabIndex={0}
+              onClick={(ev) => {
+                ev.stopPropagation();
+                onJump(e);
+              }}
+              onKeyDown={(ev) => {
+                if (ev.key === "Enter") {
+                  ev.stopPropagation();
+                  onJump(e);
+                }
+              }}
+              className="flex w-full cursor-pointer items-baseline gap-[1.5vw] border-b border-bone/10 py-[1.2vh] text-left hover:bg-bone/5"
+            >
+              <span className="w-[3vw] shrink-0 text-center text-[2.6vh]">{KIND_GLYPH[e.kind]}</span>
+              <span className="w-[6vw] shrink-0 font-crt text-[2.2vh] text-ash">R{e.round + 1}</span>
+              <span className="min-w-0 flex-1">
+                <span className="block font-display text-[3.2vh] leading-tight">{e.title}</span>
+                <span className="block font-type text-[2vh] text-bone/70">{e.detail}</span>
+              </span>
+              {e.kind === "lie" && (
+                <span className={`shrink-0 font-crt text-[2.2vh] tracking-widest ${e.caught ? "text-crt" : "text-blood"}`}>
+                  {e.caught ? "CAUGHT" : "GOT AWAY"}
+                </span>
+              )}
+              {e.verdict && (
+                <span className={`shrink-0 font-crt text-[2.2vh] tracking-widest ${e.verdict === "GUILTY" ? "text-blood" : "text-crt"}`}>
+                  {e.verdict}
+                </span>
+              )}
+              {href && (
+                <a
+                  href={href}
+                  target="_blank"
+                  rel="noreferrer"
+                  onClick={(ev) => ev.stopPropagation()}
+                  className="shrink-0 font-crt text-[2vh] text-crt underline"
+                >
+                  tx ↗
+                </a>
+              )}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }

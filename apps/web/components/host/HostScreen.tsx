@@ -233,7 +233,7 @@ export function HostScreen() {
       case "AWAIT_AIM":
         return `${cur?.name}'s turn. Pick a target.`;
       case "AWAIT_TRIGGER":
-        return `${cur?.name} is aiming at ${target?.seat === cur?.seat ? "THEMSELVES" : target?.name}…${state.config.faceIdOnTrigger && cur?.walletReady && cur.kind === "human" ? " (Face ID to pop)" : ""}`;
+        return `${cur?.name} is aiming at ${target?.seat === cur?.seat ? "THEMSELVES" : target?.name}…${target?.seat === cur?.seat && state.config.faceIdOnTrigger && cur?.walletReady && cur.kind === "human" ? " (passkey to pop)" : ""}`;
       case "RESOLVING":
         return "⛓ Popping on-chain…";
       case "RIGGED":
@@ -272,7 +272,7 @@ export function HostScreen() {
           <Lobby
             state={state}
             joinUrl={joinUrl}
-            error={error ?? (localhostWarning ? "Phones can't open localhost. Use your LAN IP, a tunnel, or the Vercel URL (Face ID needs HTTPS)." : null)}
+            error={error ?? (localhostWarning ? "Phones can't open localhost. Use your LAN IP, a tunnel, or the Vercel URL (Passkeys need HTTPS)." : null)}
             busy={busy}
             onAddBot={(p: BotId) => act(C2S.botAdd, { personality: p })}
             onKick={(seat) => act(C2S.seatKick, { seat })}

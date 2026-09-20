@@ -10,6 +10,7 @@ import { emitAck, getSocket, useConnected, useSocketEvent } from "@/lib/socket";
 import { sfx, unlockAudio } from "@/lib/sounds";
 import { Avatar, Chips, Profit, seatColor } from "../ui/bits";
 import { CheatCard } from "./CheatCard";
+import { ClownCam } from "./ClownCam";
 import { NAME_KEY } from "./JoinForm";
 
 function playerId(room: string): string {
@@ -41,6 +42,7 @@ export function PhoneController({ room }: { room: string }) {
   const [riggedOpen, setRiggedOpen] = useState(false);
   const [peekShow, setPeekShow] = useState<{ live: boolean; shell: number; at: number } | null>(null);
   const [hit, setHit] = useState(0);
+  const [clown, setClown] = useState(false);
   const peekKey = useRef("");
 
   const say = useCallback((text: string) => setToast({ text, at: Date.now() }), []);
@@ -60,7 +62,7 @@ export function PhoneController({ room }: { room: string }) {
     const id = playerId(room);
     const s = getSocket();
     const join = async () => {
-      // Tell the server a Face ID wallet is coming, so it doesn't open a house wallet first.
+      // Tell the server a passkey wallet is coming, so it doesn't open a house wallet first.
       const pk = loadPasskey();
       const r = await emitAck<{ seat: number }>(C2S.roomJoin, { room, name, playerId: id, passkey: !!pk });
       if (!r.ok) return setJoinError(r.error);
@@ -97,6 +99,7 @@ export function PhoneController({ room }: { room: string }) {
           navigator.vibrate?.([220, 80, 220]);
           setHit(Date.now());
           sfx.bang();
+          if (f.shooter === priv.seat) setClown(true);
         }
         if (f.type === "verdict" && f.from === priv.seat) navigator.vibrate?.([120, 60, 120]);
         if (f.type === "verdict" && f.to === priv.seat) say(`+${f.chips} chip${f.chips === 1 ? "" : "s"} from ${f.to === f.accuser ? "the cheater" : "your accuser"}`);
@@ -170,7 +173,7 @@ export function PhoneController({ room }: { room: string }) {
   const signIfNeeded = (requirePasskey: boolean, challenge: string) => {
     const pk = loadPasskey();
     if (requirePasskey && !pk) throw new Error("This phone lost its passkey. Rejoin to make a new one.");
-    if (pk && (requirePasskey || state?.config.faceIdOnTrigger)) return signChallenge(pk.credentialId, challenge);
+    if (pk && requirePasskey) return signChallenge(pk.credentialId, challenge);
     return Promise.resolve(undefined);
   };
 
@@ -217,7 +220,7 @@ export function PhoneController({ room }: { room: string }) {
   };
 
   /**
-   * Buying in takes two taps on a Face ID wallet: the first asks the bank to prepare the $12
+   * Buying in takes two taps on a passkey wallet: the first asks the bank to prepare the $12
    * transfer, the second signs it (WebAuthn only runs inside a tap). House-held wallets pay on
    * the first tap.
    */
@@ -304,13 +307,13 @@ export function PhoneController({ room }: { room: string }) {
           : buying === "paying"
             ? "PAYING…"
             : buyCh?.requirePasskey
-              ? `🔐 PAY ${dollars(MONEY.buyInCents)} WITH FACE ID`
+              ? `🔐 PAY ${dollars(MONEY.buyInCents)} WITH PASSKEY`
               : `BUY IN · ${dollars(MONEY.buyInCents)}`}
       </button>
       <p className="mt-2 font-crt text-base leading-tight text-ash">
         {me.walletReady
-          ? `Fake dollars (${MONEY.ticker}) move from your Face ID wallet to the cashier.`
-          : `The house holds your ${MONEY.ticker} for you (no Face ID on this phone).`}
+          ? `Fake dollars (${MONEY.ticker}) move from your passkey wallet to the cashier.`
+          : `The house holds your ${MONEY.ticker} for you (no passkey on this phone).`}
       </p>
     </div>
   );
@@ -322,7 +325,7 @@ export function PhoneController({ room }: { room: string }) {
         <div className="min-w-0 flex-1">
           <p className="truncate font-display text-2xl leading-none tracking-wide">{me.name}</p>
           <p className="font-crt text-base text-ash">
-            {me.walletReady ? "🔐 Face ID wallet" : "🎩 house wallet"} · {me.bankrollCents !== null ? dollars(me.bankrollCents) : "…"} · {room}
+            {me.walletReady ? "🔐 passkey wallet" : "🎩 house wallet"} · {me.bankrollCents !== null ? dollars(me.bankrollCents) : "…"} · {room}
             {connected ? "" : " · reconnecting…"}
           </p>
         </div>
@@ -452,7 +455,7 @@ export function PhoneController({ room }: { room: string }) {
                   POP
                   <br />
                   IT
-                  {(trigCh.requirePasskey || (state.config.faceIdOnTrigger && loadPasskey())) && <span className="mt-2 block font-crt text-lg">🔐 Face ID</span>}
+                  {trigCh.requirePasskey && <span className="mt-2 block font-crt text-lg">🔐 passkey</span>}
                 </>
               ) : (
                 "ARMING…"
@@ -605,7 +608,7 @@ export function PhoneController({ room }: { room: string }) {
                 </p>
                 <p className="font-crt text-lg text-ash">Win {state.seats[accuseCh.accused!]?.chips ?? 0} chips or lose 1.</p>
                 <button onClick={swear} disabled={firing} className="mt-4 w-full rounded-2xl bg-blood py-5 font-display text-3xl tracking-wide disabled:opacity-50">
-                  {firing ? "…" : accuseCh.requirePasskey || (state.config.faceIdOnTrigger && loadPasskey()) ? "🔐 SWEAR ON YOUR FACE" : "SWEAR IT"}
+                  {firing ? "…" : accuseCh.requirePasskey ? "🔐 SWEAR WITH PASSKEY" : "SWEAR IT"}
                 </button>
               </>
             )}
@@ -615,6 +618,8 @@ export function PhoneController({ room }: { room: string }) {
           </motion.div>
         </motion.div>
       )}
+
+      <ClownCam active={clown} onDone={() => setClown(false)} />
     </main>
   );
 }

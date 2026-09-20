@@ -206,6 +206,13 @@ body {
   -webkit-touch-callout: none;
 }
 
+button {
+  cursor: pointer;
+}
+button:disabled {
+  cursor: not-allowed;
+}
+
 button:focus-visible,
 a:focus-visible,
 input:focus-visible {
